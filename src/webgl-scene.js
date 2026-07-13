@@ -23,6 +23,9 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
 
   const camera = new THREE.PerspectiveCamera(42, 1, 0.08, 2600);
   camera.position.set(0, 230, 520);
+  const navigationFill = new THREE.PointLight(0xd8eef5, 48, 180, 1.4);
+  navigationFill.position.set(0, 2, 4);
+  camera.add(navigationFill);
   scene.add(camera);
 
   const systemGroup = new THREE.Group();
@@ -132,8 +135,11 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
     const progress = arriving ? resolveCockpitProgress(frame) : 0;
     oortCloud.group.rotation.y = frame.sceneTime * 0.0012;
     oortCloud.group.rotation.x = Math.sin(frame.sceneTime * 0.006) * 0.025;
-    oortCloud.points.material.opacity = arriving ? 0.24 + progress * 0.5 : 0.2;
-    oortCloud.comets.material.opacity = arriving ? 0.18 + progress * 0.42 : 0.12;
+    oortCloud.points.material.opacity = arriving ? 0.42 + progress * 0.38 : 0.34;
+    oortCloud.comets.material.opacity = arriving ? 0.28 + progress * 0.34 : 0.16;
+    for (const boundary of oortCloud.boundaries) {
+      boundary.material.opacity = arriving ? 0.2 + progress * 0.18 : 0.13;
+    }
   }
 
   function pick(clientX, clientY) {
@@ -148,9 +154,13 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
 
   function updateBodies(frame) {
     const routeIds = new Set(frame.route.waypoints);
+    const ephemerisDay = frame.ephemerisDay ?? frame.state.day;
+    const isolatedDestination =
+      frame.state.viewMode === "follow" || (frame.state.viewMode === "cockpit" && frame.state.routeProgress >= 0.998);
     for (const body of bodies) {
       const entry = bodyEntries.get(body.id);
-      const position = getBodyPosition(body.id, frame.state.day);
+      entry.group.visible = !isolatedDestination || body.id === frame.state.destination;
+      const position = getBodyPosition(body.id, ephemerisDay);
       entry.group.position.set(position.x, position.y, position.z);
 
       const visual = visuals[body.id] || {};
@@ -161,7 +171,7 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
       const selected = body.id === frame.state.selectedBody || routeIds.has(body.id);
       entry.halo.visible =
         body.id === "sun" ||
-        (selected && frame.state.viewMode !== "cockpit" && frame.state.viewMode !== "destination");
+        (selected && !["cockpit", "destination", "follow"].includes(frame.state.viewMode));
       if (selected) {
         const pulse = 1 + Math.sin(frame.sceneTime * 2.2 + body.priority) * 0.06;
         entry.halo.scale.setScalar(entry.displayRadius * 4.3 * pulse);
@@ -175,13 +185,14 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
   }
 
   function updateOrbits(frame) {
+    const ephemerisDay = frame.ephemerisDay ?? frame.state.day;
     for (const orbit of orbitEntries) {
-      const parent = orbit.body.parent ? getBodyPosition(orbit.body.parent, frame.state.day) : { x: 0, y: 0, z: 0 };
+      const parent = orbit.body.parent ? getBodyPosition(orbit.body.parent, ephemerisDay) : { x: 0, y: 0, z: 0 };
       orbit.line.position.set(parent.x, parent.y, parent.z);
       const active = orbit.body.id === frame.state.origin || orbit.body.id === frame.state.destination;
       orbit.line.material.color.set(active ? 0xf1b75c : 0xa9b7bd);
       orbit.line.material.opacity = frame.state.layers.orbits ? (active ? 0.42 : 0.13) : 0;
-      orbit.line.visible = frame.state.layers.orbits;
+      orbit.line.visible = frame.state.layers.orbits && !["cockpit", "follow"].includes(frame.state.viewMode);
     }
   }
 
@@ -194,10 +205,11 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
     }
     routeGroup.visible = true;
     routeCurve = new THREE.CatmullRomCurve3(vectors, false, "centripetal", 0.35);
-    const destinationView = frame.state.viewMode === "destination";
-    routeState.tube.visible = !destinationView && frame.state.viewMode !== "cockpit";
-    routeState.glowLine.visible = !destinationView;
-    routeState.flowGroup.visible = !destinationView;
+    const closeView = frame.state.viewMode === "destination" || frame.state.viewMode === "follow";
+    const cockpitView = frame.state.viewMode === "cockpit";
+    routeState.tube.visible = !closeView && !cockpitView;
+    routeState.glowLine.visible = !closeView && !cockpitView;
+    routeState.flowGroup.visible = !closeView && !cockpitView;
 
     const routeKey = `${frame.route.waypoints.join("-")}:${Math.floor(frame.state.day / 2)}`;
     if (routeKey !== routeGeometryKey) {
@@ -230,7 +242,7 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
     }
 
     const shipVisible = frame.state.missionActive || frame.state.routeProgress > 0;
-    routeState.ship.visible = shipVisible && frame.state.viewMode !== "cockpit" && !destinationView;
+    routeState.ship.visible = shipVisible && frame.state.viewMode !== "cockpit" && !closeView;
     if (shipVisible) {
       const progress = THREE.MathUtils.clamp(frame.state.routeProgress, 0, 0.9999);
       const point = routeCurve.getPointAt(progress);
@@ -250,7 +262,7 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
 
     const baseProgress = resolveCockpitProgress(frame);
     const start = routeCurve.getPointAt(baseProgress);
-    const destinationPosition = getBodyPosition(frame.state.destination, frame.state.day);
+    const destinationPosition = getBodyPosition(frame.state.destination, frame.ephemerisDay ?? frame.state.day);
     const destination = new THREE.Vector3(destinationPosition.x, destinationPosition.y, destinationPosition.z);
     const direction = destination.clone().sub(start).normalize();
     for (let index = 0; index < routeState.gateMeshes.length; index += 1) {
@@ -269,6 +281,10 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
   function updateCamera(frame) {
     if (frame.state.viewMode === "cockpit" && routeCurve) {
       updateCockpitCamera(frame);
+      return;
+    }
+    if (frame.state.viewMode === "follow") {
+      updateBodyFollowCamera(frame);
       return;
     }
 
@@ -298,7 +314,7 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
     } else if (frame.state.viewMode === "route") {
       distance = 380 / Math.max(frame.state.camera.zoom, 0.5);
     } else {
-      distance = 440 / Math.max(frame.state.camera.zoom, 0.5);
+      distance = 650 / Math.max(frame.state.camera.zoom, 0.5);
     }
 
     desiredCamera.copy(currentTarget).addScaledVector(direction, distance);
@@ -312,6 +328,10 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
 
   function updateCockpitCamera(frame) {
     const progress = resolveCockpitProgress(frame);
+    if (progress >= 0.998) {
+      updateArrivalCamera(frame);
+      return;
+    }
     const point = routeCurve.getPointAt(progress);
     const tangent = routeCurve.getTangentAt(Math.min(progress + 0.002, 0.999)).normalize();
     const side = new THREE.Vector3().crossVectors(tangent, UP).normalize();
@@ -323,7 +343,8 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
       .addScaledVector(tangent, -3.4)
       .addScaledVector(UP, 1.25)
       .addScaledVector(side, 0.35);
-    const originPosition = getBodyPosition(frame.state.origin, frame.state.day);
+    const ephemerisDay = frame.ephemerisDay ?? frame.state.day;
+    const originPosition = getBodyPosition(frame.state.origin, ephemerisDay);
     const origin = new THREE.Vector3(originPosition.x, originPosition.y, originPosition.z);
     const departureCamera = origin
       .clone()
@@ -332,8 +353,9 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
       .addScaledVector(side, originRadius * 1.25);
     desiredCamera.lerp(departureCamera, departureAmount);
     lookTarget.copy(point).addScaledVector(tangent, 34).addScaledVector(UP, 0.4);
-    const destination = getBodyPosition(frame.state.destination, frame.state.day);
-    lookTarget.lerp(new THREE.Vector3(destination.x, destination.y, destination.z), 0.44 + (1 - departureAmount) * 0.38);
+    const destination = getBodyPosition(frame.state.destination, ephemerisDay);
+    const arrivalBlend = THREE.MathUtils.smoothstep(progress, 0.82, 0.985);
+    lookTarget.lerp(new THREE.Vector3(destination.x, destination.y, destination.z), arrivalBlend);
     const departureLook = origin.clone().addScaledVector(UP, originRadius * 0.12);
     lookTarget.lerp(departureLook, departureAmount);
     const amount = 1 - Math.exp(-frame.dt * 6.8);
@@ -342,6 +364,43 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
     camera.up.set(0, 1, 0);
     camera.lookAt(currentTarget);
     camera.fov = THREE.MathUtils.lerp(camera.fov, width <= 760 ? 63 : 56, amount);
+    camera.updateProjectionMatrix();
+  }
+
+  function updateArrivalCamera(frame) {
+    const entry = bodyEntries.get(frame.state.destination);
+    const position = getBodyPosition(frame.state.destination, frame.ephemerisDay ?? frame.state.day);
+    const destination = new THREE.Vector3(position.x, position.y, position.z);
+    const radius = entry?.displayRadius || 2;
+    desiredCamera.copy(destination).add(new THREE.Vector3(radius * 3.8 + 7, radius * 1.1 + 2, radius * 4.6 + 9));
+    const amount = 1 - Math.exp(-frame.dt * 3.2);
+    camera.position.lerp(desiredCamera, amount);
+    currentTarget.lerp(destination, amount);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(currentTarget);
+    camera.fov = THREE.MathUtils.lerp(camera.fov, width <= 760 ? 52 : 42, amount);
+    camera.updateProjectionMatrix();
+  }
+
+  function updateBodyFollowCamera(frame) {
+    const entry = bodyEntries.get(frame.state.destination);
+    if (!entry) return;
+    const position = getBodyPosition(frame.state.destination, frame.ephemerisDay ?? frame.state.day);
+    const destination = new THREE.Vector3(position.x, position.y, position.z);
+    const radius = entry.displayRadius || 2;
+    const spinAngle = entry.surface.rotation.y + 0.68;
+    const distance = radius * (entry.body.ringed ? 7.2 : 4.8) + 8;
+    desiredCamera.set(
+      destination.x + Math.sin(spinAngle) * distance,
+      destination.y + radius * 0.42 + 1.4,
+      destination.z + Math.cos(spinAngle) * distance,
+    );
+    const amount = 1 - Math.exp(-frame.dt * 4.2);
+    camera.position.lerp(desiredCamera, amount);
+    currentTarget.lerp(destination, amount);
+    camera.up.set(0, 1, 0);
+    camera.lookAt(currentTarget);
+    camera.fov = THREE.MathUtils.lerp(camera.fov, entry.body.ringed ? 39 : 34, amount);
     camera.updateProjectionMatrix();
   }
 
@@ -375,7 +434,7 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
         entry.label.hidden = true;
         continue;
       }
-      if (frame.state.viewMode === "destination" && body.id === frame.state.destination) {
+      if (["destination", "follow"].includes(frame.state.viewMode) && body.id === frame.state.destination) {
         entry.label.hidden = true;
         continue;
       }
@@ -837,18 +896,18 @@ function createDepartureScenery(glowTexture) {
 
 function createOortCloud() {
   const group = new THREE.Group();
-  const count = 6200;
+  const count = 7800;
   const positions = new Float32Array(count * 3);
   const colors = new Float32Array(count * 3);
   const ice = new THREE.Color(0xaed8e3);
   const dust = new THREE.Color(0x86979d);
   for (let index = 0; index < count; index += 1) {
-    const shell = 430 + Math.pow(Math.random(), 0.72) * 310;
     const theta = Math.random() * TAU;
-    const phi = Math.acos(2 * Math.random() - 1);
-    positions[index * 3] = shell * Math.sin(phi) * Math.cos(theta);
-    positions[index * 3 + 1] = shell * Math.cos(phi) * 0.78;
-    positions[index * 3 + 2] = shell * Math.sin(phi) * Math.sin(theta);
+    const radius = 338 + Math.pow(Math.random(), 0.78) * 102;
+    const layer = (Math.random() + Math.random() + Math.random() - 1.5) * 34;
+    positions[index * 3] = Math.cos(theta) * radius;
+    positions[index * 3 + 1] = layer + Math.sin(theta * 3) * 7;
+    positions[index * 3 + 2] = Math.sin(theta) * radius;
     const color = Math.random() > 0.42 ? ice : dust;
     const brightness = 0.35 + Math.random() * 0.65;
     colors[index * 3] = color.r * brightness;
@@ -865,19 +924,39 @@ function createOortCloud() {
       sizeAttenuation: true,
       vertexColors: true,
       transparent: true,
-      opacity: 0.2,
+      opacity: 0.34,
       blending: THREE.AdditiveBlending,
       depthWrite: false,
     }),
   );
   group.add(points);
 
-  const cometCount = 90;
+  const boundaries = [338, 368, 406, 440].map((radius, boundaryIndex) => {
+    const vertices = [];
+    for (let index = 0; index < 320; index += 1) {
+      const angle = (index / 320) * TAU;
+      vertices.push(new THREE.Vector3(Math.cos(angle) * radius, Math.sin(angle * 3) * 4, Math.sin(angle) * radius));
+    }
+    const line = new THREE.LineLoop(
+      new THREE.BufferGeometry().setFromPoints(vertices),
+      new THREE.LineBasicMaterial({
+        color: boundaryIndex % 2 === 0 ? 0x91c8d1 : 0x6e8f98,
+        transparent: true,
+        opacity: 0.13,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    group.add(line);
+    return line;
+  });
+
+  const cometCount = 120;
   const cometPositions = new Float32Array(cometCount * 6);
   for (let index = 0; index < cometCount; index += 1) {
-    const radius = 450 + Math.random() * 260;
+    const radius = 345 + Math.random() * 88;
     const theta = Math.random() * TAU;
-    const y = (Math.random() - 0.5) * 530;
+    const y = (Math.random() - 0.5) * 72;
     const x = Math.cos(theta) * radius;
     const z = Math.sin(theta) * radius;
     const offset = index * 6;
@@ -901,7 +980,7 @@ function createOortCloud() {
     }),
   );
   group.add(comets);
-  return { group, points, comets };
+  return { group, points, comets, boundaries };
 }
 
 function createStarfield() {
@@ -1044,9 +1123,9 @@ function createBodyLabel(body) {
 
 function resolveCockpitProgress(frame) {
   if (frame.state.missionActive || frame.state.routeProgress > 0) {
-    return THREE.MathUtils.clamp(frame.state.routeProgress, 0.008, 0.96);
+    return THREE.MathUtils.clamp(frame.state.routeProgress, 0.008, 0.9995);
   }
-  return 0.015 + Math.sin(frame.sceneTime * 0.12) * 0.0025;
+  return 0.015;
 }
 
 function intersects(a, b) {

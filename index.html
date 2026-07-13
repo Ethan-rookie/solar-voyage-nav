@@ -144,6 +144,14 @@
         <i><em id="cockpitProgress"></em></i>
       </section>
 
+      <div class="cockpit-frame" aria-hidden="true">
+        <div class="cockpit-heading-tape"><span>330</span><b>N</b><span>030</span></div>
+        <div class="cockpit-reticle"><i></i><i></i><span></span></div>
+        <div class="cockpit-side-scale is-left"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="cockpit-side-scale is-right"><i></i><i></i><i></i><i></i><i></i></div>
+        <div class="cockpit-horizon-line"></div>
+      </div>
+
       <section class="cockpit-console" aria-label="飞行器操控台">
         <div class="cockpit-instruments">
           <div class="attitude-display" aria-hidden="true">
@@ -167,6 +175,7 @@
         <button class="view-button is-active" data-view="overview" type="button">总览</button>
         <button class="view-button" data-view="route" type="button">路线</button>
         <button class="view-button" data-view="destination" type="button">近景</button>
+        <button class="view-button real-follow-view" data-view="follow" type="button">自转跟随</button>
         <button class="view-button" data-view="cockpit" type="button">深空</button>
       </div>
 

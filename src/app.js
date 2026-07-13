@@ -480,12 +480,12 @@ const BODIES = [
   },
   {
     id: "oort",
-    name: "奥尔特云前哨",
+    name: "奥尔特云环",
     family: "深空区域",
     radius: 1.3,
     color: "#a9d9e8",
     accent: "#e3fbff",
-    orbitRadius: 520,
+    orbitRadius: 390,
     orbitDays: 3650000,
     phase: 5.4,
     inclination: 18,
@@ -834,6 +834,9 @@ const state = {
   missionActive: false,
   routeProgress: 0,
   missionFuelCommitted: false,
+  missionDepartureDay: null,
+  missionRoute: null,
+  missionRoutePoints: null,
   inventory: {
     helios: 6,
     ferrite: 4,
@@ -1033,6 +1036,7 @@ function renderModeButtons() {
     button.dataset.mode = mode.id;
     button.innerHTML = `<strong>${mode.name}</strong><span>${mode.hint}</span>`;
     button.addEventListener("click", () => {
+      resetMissionNavigation();
       state.mode = mode.id;
       syncPanels();
     });
@@ -1056,6 +1060,7 @@ function renderVehicleList() {
       <span class="vehicle-speed">${vehicle.speed.toFixed(1)} u/d</span>
     `;
     button.addEventListener("click", () => {
+      resetMissionNavigation();
       state.vehicle = vehicle.id;
       syncPanels();
     });
@@ -1069,9 +1074,11 @@ function bindEvents() {
       const nextMode = button.dataset.experience;
       if (nextMode === state.experienceMode) return;
       state.experienceMode = nextMode;
-      state.missionActive = false;
-      state.missionFuelCommitted = false;
-      state.routeProgress = 0;
+      resetMissionNavigation();
+      if (nextMode !== "real" && state.viewMode === "follow") {
+        state.viewMode = "overview";
+        applyViewMode("overview");
+      }
       if (nextMode === "real" && (bodyById.get(state.origin)?.region || bodyById.get(state.destination)?.region)) {
         state.origin = "earth";
         state.destination = "mars";
@@ -1086,21 +1093,21 @@ function bindEvents() {
   elements.originSelect.addEventListener("change", () => {
     state.origin = elements.originSelect.value;
     state.selectedBody = state.origin;
-    state.routeProgress = 0;
+    resetMissionNavigation();
     syncPanels();
     ensureAstrodynamicsData();
   });
   elements.destinationSelect.addEventListener("change", () => {
     state.destination = elements.destinationSelect.value;
     state.selectedBody = state.destination;
-    state.routeProgress = 0;
+    resetMissionNavigation();
     syncPanels();
     ensureAstrodynamicsData();
   });
   elements.swapRoute.addEventListener("click", () => {
     [state.origin, state.destination] = [state.destination, state.origin];
     state.selectedBody = state.destination;
-    state.routeProgress = 0;
+    resetMissionNavigation();
     populateRouteSelects();
     syncPanels();
     ensureAstrodynamicsData();
@@ -1139,29 +1146,31 @@ function bindEvents() {
     state.layers.stations = elements.stationsLayer.checked;
   });
   elements.playTime.addEventListener("click", () => {
+    if (state.missionRoute && state.routeProgress < 1) return;
     state.playing = !state.playing;
     elements.playTime.textContent = state.playing ? "Ⅱ" : "▶";
     elements.playTime.title = state.playing ? "暂停时间" : "播放时间";
   });
   elements.timeSlider.addEventListener("input", () => {
+    resetMissionNavigation();
     state.day = Number(elements.timeSlider.value);
-    state.routeProgress = 0;
     syncPanels();
   });
   elements.flightDays.addEventListener("input", () => {
+    resetMissionNavigation();
     state.realFlightDays = Number(elements.flightDays.value);
-    state.routeProgress = 0;
     syncPanels();
   });
   elements.travelModeButtons.forEach((button) => {
     button.addEventListener("click", () => {
+      resetMissionNavigation();
       state.travelMode = button.dataset.travelMode;
       syncPanels();
     });
   });
   elements.throttle.addEventListener("input", () => {
     state.throttle = Number(elements.throttle.value);
-    updateCockpitConsole(buildRoute());
+    updateCockpitConsole(getDisplayedRoute());
   });
   elements.collectEnergy.addEventListener("click", collectCurrentEnergy);
   elements.warpControl.addEventListener("click", () => {
@@ -1209,7 +1218,7 @@ function bindEvents() {
 }
 
 function syncPanels() {
-  const route = buildRoute();
+  const route = getDisplayedRoute();
   const origin = bodyById.get(state.origin);
   const destination = bodyById.get(state.destination);
   const vehicle = vehicleById.get(state.vehicle);
@@ -1409,20 +1418,32 @@ function getMiningBody() {
   return state.routeProgress >= 1 ? bodyById.get(state.destination) : bodyById.get(state.origin);
 }
 
+function getDisplayedRoute() {
+  return state.missionRoute && state.routeProgress > 0 ? state.missionRoute : buildRoute();
+}
+
+function resetMissionNavigation() {
+  state.missionActive = false;
+  state.routeProgress = 0;
+  state.missionFuelCommitted = false;
+  state.missionDepartureDay = null;
+  state.missionRoute = null;
+  state.missionRoutePoints = null;
+  elements.playTime.disabled = false;
+  elements.launchButton.textContent = "启航";
+}
+
 function startMission() {
   if (state.missionActive) {
     state.missionActive = false;
     elements.launchButton.textContent = "继续航行";
     return;
   }
-  const route = buildRoute();
+  if (state.routeProgress >= 1) resetMissionNavigation();
+  const route = getDisplayedRoute();
   if (state.experienceMode === "real" && !route.realSolution) {
     elements.dataStatus.textContent = "Lambert 尚未收敛，不能启航";
     return;
-  }
-  if (state.routeProgress >= 1) {
-    state.routeProgress = 0;
-    state.missionFuelCommitted = false;
   }
   if (state.experienceMode === "fantasy" && !state.missionFuelCommitted) {
     const plan = route.energyPlan;
@@ -1435,6 +1456,15 @@ function startMission() {
     state.inventory[plan.energyId] -= plan.required;
     state.missionFuelCommitted = true;
   }
+  if (!state.missionRoute) {
+    state.missionDepartureDay = state.day;
+    state.missionRoute = route;
+    state.missionRoutePoints = getRouteCurvePoints(route);
+  }
+  state.playing = false;
+  elements.playTime.textContent = "▶";
+  elements.playTime.title = "航行中时间由导航控制";
+  elements.playTime.disabled = true;
   state.missionActive = true;
   state.viewMode = "cockpit";
   applyViewMode("cockpit");
@@ -1445,7 +1475,7 @@ function startMission() {
 function updateCockpitConsole(route) {
   const progress = clamp(state.routeProgress, 0, 1);
   const reactor = clamp(Math.round(96 - progress * 42 - (state.travelMode === "warp" ? 12 : 0)), 24, 99);
-  const angle = Math.sin(sceneTime * 0.7) * (state.missionActive ? 4.8 : 1.2);
+  const angle = Math.sin(sceneTime * 0.32) * (state.missionActive ? 1.4 : 0.35);
   elements.throttle.value = state.throttle;
   elements.throttleValue.textContent = `${state.throttle}%`;
   elements.attitudeValue.textContent = `${angle >= 0 ? "+" : ""}${angle.toFixed(1)}°`;
@@ -1547,22 +1577,38 @@ function tick(now) {
       syncPanels();
     }
   }
-  const route = buildRoute();
+  const route = getDisplayedRoute();
   if (state.missionActive) {
     const throttleFactor = state.throttle / 62;
-    const warpFactor = state.experienceMode === "fantasy" && state.travelMode === "warp" ? 4.6 : 1;
-    state.routeProgress += (dt * throttleFactor * warpFactor) / Math.max(route.durationDays / 18, 8);
+    const playbackSeconds =
+      state.experienceMode === "real"
+        ? clamp(route.durationDays / 26, 8, 18)
+        : state.travelMode === "warp"
+          ? 3.2
+          : clamp(route.durationDays / 5, 6, 14);
+    state.routeProgress += (dt * throttleFactor) / playbackSeconds;
     if (state.routeProgress >= 1) {
       state.routeProgress = 1;
       state.missionActive = false;
       state.missionFuelCommitted = false;
-      elements.launchButton.textContent = "启航";
-      elements.dataStatus.textContent = `已抵达 ${bodyById.get(state.destination).name} · 可开始采集`;
+      state.day = Math.min(2400, state.missionDepartureDay + route.durationDays);
+      elements.timeSlider.value = Math.round(state.day);
+      elements.playTime.disabled = false;
+      elements.playTime.title = "播放时间";
+      elements.launchButton.textContent = "再次启航";
+      elements.dataStatus.textContent =
+        state.experienceMode === "real"
+          ? `导航完成 · 已锁定 ${bodyById.get(state.destination).name} 伴飞轨道`
+          : `已抵达 ${bodyById.get(state.destination).name} · 可开始采集`;
       renderEnergyInventory();
     }
   }
   elements.dateChip.textContent = formatDate(state.day);
-  const routePoints = getRouteCurvePoints(route);
+  const routePoints = state.missionRoutePoints && state.routeProgress > 0 ? state.missionRoutePoints : getRouteCurvePoints(route);
+  const ephemerisDay =
+    state.missionRoute && state.missionDepartureDay !== null
+      ? state.missionDepartureDay + route.durationDays * state.routeProgress
+      : state.day;
   updateCockpitHud(route);
   updateCockpitConsole(route);
   webglScene?.render({
@@ -1572,6 +1618,7 @@ function tick(now) {
     vehicle: vehicleById.get(state.vehicle),
     sceneTime,
     dt,
+    ephemerisDay,
   });
   renderPlanetPreview();
   requestAnimationFrame(tick);
@@ -1581,8 +1628,9 @@ function updateCockpitHud(route) {
   const origin = bodyById.get(state.origin);
   const destination = bodyById.get(state.destination);
   const progress = clamp(state.routeProgress, 0, 1);
-  elements.cockpitTitle.textContent = progress < 0.08 ? `离港 · ${origin.port}` : `前往${destination.name}`;
-  elements.cockpitRemaining.textContent = formatDuration(route.durationDays * (1 - progress));
+  elements.cockpitTitle.textContent =
+    progress >= 1 ? `已抵达 · ${destination.name}` : progress < 0.08 ? `离港 · ${origin.port}` : `前往${destination.name}`;
+  elements.cockpitRemaining.textContent = progress >= 1 ? "已到达" : formatDuration(route.durationDays * (1 - progress));
   elements.cockpitDuration.textContent = formatDuration(route.durationDays);
   elements.cockpitDistance.textContent = `${route.distanceAu.toFixed(2)} au`;
   elements.cockpitProgress.style.width = `${Math.max(4, progress * 100)}%`;
@@ -3314,6 +3362,10 @@ function applyViewMode(mode) {
     setCameraGoal(-0.58, 0.46, 3.05);
     return;
   }
+  if (mode === "follow") {
+    setCameraGoal(-0.22, 0.18, 2.7);
+    return;
+  }
   if (mode === "cockpit") {
     setCameraGoal(-0.62, 0.18, 1.7);
     return;
@@ -3329,6 +3381,7 @@ function setCameraGoal(yaw, pitch, zoom) {
 
 function syncViewChrome(mode) {
   elements.appShell?.classList.toggle("is-cockpit", mode === "cockpit");
+  elements.appShell?.classList.toggle("is-follow", mode === "follow");
   elements.viewButtons.forEach((button) => {
     button.classList.toggle("is-active", button.dataset.view === mode);
   });
@@ -3375,7 +3428,7 @@ function pickBody(x, y) {
   if (!winner || winner.id === "sun") return;
   state.selectedBody = winner.id;
   state.destination = winner.id === state.origin ? state.destination : winner.id;
-  state.routeProgress = 0;
+  resetMissionNavigation();
   elements.destinationSelect.value = state.destination;
   const placeTab = elements.tabs.find((tab) => tab.dataset.panel === "place");
   placeTab.click();
