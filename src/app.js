@@ -1,7 +1,8 @@
-import { createSolarScene } from "./webgl-scene.js?v=20260713-2";
-import { AU_KM, createAstrodynamicsEngine } from "./astrodynamics.js?v=20260713-2";
+import { createSolarScene } from "./webgl-scene.js?v=20260713-3";
+import { AU_KM, createAstrodynamicsEngine } from "./astrodynamics.js?v=20260713-3";
 
 const TAU = Math.PI * 2;
+const DEPARTURE_HOLD_SECONDS = 2.6;
 const BASE_DATE = new Date(Date.UTC(2042, 0, 1));
 
 const BODIES = [
@@ -833,6 +834,8 @@ const state = {
   viewMode: "overview",
   missionActive: false,
   routeProgress: 0,
+  launchSequenceElapsed: 0,
+  launchSequenceComplete: false,
   missionFuelCommitted: false,
   missionDepartureDay: null,
   missionRoute: null,
@@ -1420,12 +1423,14 @@ function getMiningBody() {
 }
 
 function getDisplayedRoute() {
-  return state.missionRoute && state.routeProgress > 0 ? state.missionRoute : buildRoute();
+  return state.missionRoute || buildRoute();
 }
 
 function resetMissionNavigation() {
   state.missionActive = false;
   state.routeProgress = 0;
+  state.launchSequenceElapsed = 0;
+  state.launchSequenceComplete = false;
   state.missionFuelCommitted = false;
   state.missionDepartureDay = null;
   state.missionRoute = null;
@@ -1469,7 +1474,9 @@ function startMission() {
   state.missionActive = true;
   state.viewMode = "cockpit";
   applyViewMode("cockpit");
-  elements.launchButton.textContent = state.travelMode === "warp" && state.experienceMode === "fantasy" ? "跃迁中" : "巡航中";
+  const activeFlightLabel =
+    state.travelMode === "warp" && state.experienceMode === "fantasy" ? "跃迁中" : "巡航中";
+  elements.launchButton.textContent = state.launchSequenceComplete ? activeFlightLabel : "离港中";
   syncPanels();
 }
 
@@ -1580,14 +1587,23 @@ function tick(now) {
   }
   const route = getDisplayedRoute();
   if (state.missionActive) {
-    const throttleFactor = state.throttle / 62;
-    const playbackSeconds =
-      state.experienceMode === "real"
-        ? clamp(route.durationDays / 26, 8, 18)
-        : state.travelMode === "warp"
-          ? 3.2
-          : clamp(route.durationDays / 5, 6, 14);
-    state.routeProgress += (dt * throttleFactor) / playbackSeconds;
+    if (!state.launchSequenceComplete) {
+      state.launchSequenceElapsed += dt;
+      if (state.launchSequenceElapsed >= DEPARTURE_HOLD_SECONDS) {
+        state.launchSequenceComplete = true;
+        elements.launchButton.textContent =
+          state.travelMode === "warp" && state.experienceMode === "fantasy" ? "跃迁中" : "巡航中";
+      }
+    } else {
+      const throttleFactor = state.throttle / 62;
+      const playbackSeconds =
+        state.experienceMode === "real"
+          ? clamp(route.durationDays / 26, 8, 18)
+          : state.travelMode === "warp"
+            ? 3.2
+            : clamp(route.durationDays / 5, 6, 14);
+      state.routeProgress += (dt * throttleFactor) / playbackSeconds;
+    }
     if (state.routeProgress >= 1) {
       state.routeProgress = 1;
       state.missionActive = false;
@@ -1605,7 +1621,7 @@ function tick(now) {
     }
   }
   elements.dateChip.textContent = formatDate(state.day);
-  const routePoints = state.missionRoutePoints && state.routeProgress > 0 ? state.missionRoutePoints : getRouteCurvePoints(route);
+  const routePoints = state.missionRoutePoints || getRouteCurvePoints(route);
   const ephemerisDay =
     state.missionRoute && state.missionDepartureDay !== null
       ? state.missionDepartureDay + route.durationDays * state.routeProgress
