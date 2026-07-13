@@ -9,7 +9,14 @@
   <body>
     <main class="app-shell" aria-label="OrbitGo 太阳系旅行导航">
       <canvas id="spaceMap"></canvas>
-      <div class="frame-lines" aria-hidden="true"></div>
+      <div class="frame-lines" aria-hidden="true">
+        <i class="frame-corner is-top-left"></i>
+        <i class="frame-corner is-top-right"></i>
+        <i class="frame-corner is-bottom-left"></i>
+        <i class="frame-corner is-bottom-right"></i>
+        <span class="frame-ticks is-top"></span>
+        <span class="frame-ticks is-bottom"></span>
+      </div>
 
       <header class="topbar">
         <div class="brand" aria-label="OrbitGo">
@@ -134,7 +141,7 @@
       </section>
 
       <section class="cockpit-hud" aria-label="第一人称航行状态">
-        <span>FIRST PERSON / LIVE ROUTE</span>
+        <span id="cockpitPhase">DEPARTURE / 姿态建立</span>
         <strong id="cockpitTitle">前往火星</strong>
         <div>
           <span><small>剩余</small><b id="cockpitRemaining">26 天</b></span>
@@ -145,11 +152,17 @@
       </section>
 
       <div class="cockpit-frame" aria-hidden="true">
+        <div class="cockpit-edge is-top"><i></i><i></i><i></i></div>
+        <div class="cockpit-edge is-bottom"><i></i><i></i><i></i></div>
         <div class="cockpit-heading-tape"><span>330</span><b>N</b><span>030</span></div>
         <div class="cockpit-reticle"><i></i><i></i><span></span></div>
         <div class="cockpit-side-scale is-left"><i></i><i></i><i></i><i></i><i></i></div>
         <div class="cockpit-side-scale is-right"><i></i><i></i><i></i><i></i><i></i></div>
         <div class="cockpit-horizon-line"></div>
+        <div class="cockpit-lock is-top-left"></div>
+        <div class="cockpit-lock is-top-right"></div>
+        <div class="cockpit-lock is-bottom-left"></div>
+        <div class="cockpit-lock is-bottom-right"></div>
       </div>
 
       <section class="cockpit-console" aria-label="飞行器操控台">

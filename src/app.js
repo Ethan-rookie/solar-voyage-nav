@@ -925,6 +925,7 @@ const elements = {
   timeScale: document.getElementById("timeScale"),
   launchButton: document.getElementById("launchButton"),
   cockpitTitle: document.getElementById("cockpitTitle"),
+  cockpitPhase: document.getElementById("cockpitPhase"),
   cockpitRemaining: document.getElementById("cockpitRemaining"),
   cockpitDuration: document.getElementById("cockpitDuration"),
   cockpitDistance: document.getElementById("cockpitDistance"),
@@ -1628,8 +1629,33 @@ function updateCockpitHud(route) {
   const origin = bodyById.get(state.origin);
   const destination = bodyById.get(state.destination);
   const progress = clamp(state.routeProgress, 0, 1);
-  elements.cockpitTitle.textContent =
-    progress >= 1 ? `已抵达 · ${destination.name}` : progress < 0.08 ? `离港 · ${origin.port}` : `前往${destination.name}`;
+  const phase =
+    progress >= 1
+      ? "arrived"
+      : progress >= 0.9
+        ? "capture"
+        : progress >= 0.68
+          ? "approach"
+          : progress >= 0.08
+            ? "cruise"
+            : "departure";
+  const phaseLabels = {
+    departure: "DEPARTURE / 姿态建立",
+    cruise: "CRUISE / 深空巡航",
+    approach: "APPROACH / 进近制导",
+    capture: "ORBIT CAPTURE / 轨道捕获",
+    arrived: "ARRIVAL / 伴飞锁定",
+  };
+  const phaseTitles = {
+    departure: `离港 · ${origin.port}`,
+    cruise: `巡航 · 前往${destination.name}`,
+    approach: `进近 · ${destination.name}`,
+    capture: `捕获 · ${destination.name}轨道`,
+    arrived: `已抵达 · ${destination.name}`,
+  };
+  elements.appShell.dataset.flightPhase = phase;
+  elements.cockpitPhase.textContent = phaseLabels[phase];
+  elements.cockpitTitle.textContent = phaseTitles[phase];
   elements.cockpitRemaining.textContent = progress >= 1 ? "已到达" : formatDuration(route.durationDays * (1 - progress));
   elements.cockpitDuration.textContent = formatDuration(route.durationDays);
   elements.cockpitDistance.textContent = `${route.distanceAu.toFixed(2)} au`;

@@ -155,11 +155,16 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
   function updateBodies(frame) {
     const routeIds = new Set(frame.route.waypoints);
     const ephemerisDay = frame.ephemerisDay ?? frame.state.day;
-    const isolatedDestination =
-      frame.state.viewMode === "follow" || (frame.state.viewMode === "cockpit" && frame.state.routeProgress >= 0.998);
+    const followedDestination = frame.state.viewMode === "follow";
+    const arrivalIsolation =
+      frame.state.viewMode === "cockpit"
+        ? THREE.MathUtils.smoothstep(frame.state.routeProgress, 0.58, 0.94)
+        : 0;
     for (const body of bodies) {
       const entry = bodyEntries.get(body.id);
-      entry.group.visible = !isolatedDestination || body.id === frame.state.destination;
+      const isDestination = body.id === frame.state.destination;
+      entry.group.visible = !followedDestination || isDestination;
+      entry.group.scale.setScalar(isDestination ? 1 : 1 - arrivalIsolation * 0.96);
       const position = getBodyPosition(body.id, ephemerisDay);
       entry.group.position.set(position.x, position.y, position.z);
 
@@ -261,6 +266,7 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
     if (!cockpit) return;
 
     const baseProgress = resolveCockpitProgress(frame);
+    const captureFade = 1 - THREE.MathUtils.smoothstep(baseProgress, 0.5, 0.68);
     const start = routeCurve.getPointAt(baseProgress);
     const destinationPosition = getBodyPosition(frame.state.destination, frame.ephemerisDay ?? frame.state.day);
     const destination = new THREE.Vector3(destinationPosition.x, destinationPosition.y, destinationPosition.z);
@@ -273,7 +279,7 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
       gate.quaternion.setFromUnitVectors(FORWARD, direction);
       const scale = 1.7 + index * 0.18;
       gate.scale.setScalar(scale);
-      gate.material.opacity = 0.18 - index * 0.014;
+      gate.material.opacity = (0.18 - index * 0.014) * captureFade;
       gate.rotation.z = frame.sceneTime * 0.08 + index * 0.31;
     }
   }
@@ -328,17 +334,14 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
 
   function updateCockpitCamera(frame) {
     const progress = resolveCockpitProgress(frame);
-    if (progress >= 0.998) {
-      updateArrivalCamera(frame);
-      return;
-    }
     const point = routeCurve.getPointAt(progress);
     const tangent = routeCurve.getTangentAt(Math.min(progress + 0.002, 0.999)).normalize();
-    const side = new THREE.Vector3().crossVectors(tangent, UP).normalize();
-    if (!Number.isFinite(side.x)) side.set(1, 0, 0);
+    const side = new THREE.Vector3().crossVectors(tangent, UP);
+    if (side.lengthSq() < 0.0001) side.set(1, 0, 0);
+    else side.normalize();
     const originRadius = bodyEntries.get(frame.state.origin)?.displayRadius || 2;
     const departureAmount = 1 - THREE.MathUtils.smoothstep(progress, 0.01, 0.11);
-    desiredCamera
+    const routeCamera = new THREE.Vector3()
       .copy(point)
       .addScaledVector(tangent, -3.4)
       .addScaledVector(UP, 1.25)
@@ -351,34 +354,43 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
       .addScaledVector(tangent, -(originRadius * 2.7 + 8))
       .addScaledVector(UP, originRadius * 0.7 + 1.5)
       .addScaledVector(side, originRadius * 1.25);
-    desiredCamera.lerp(departureCamera, departureAmount);
-    lookTarget.copy(point).addScaledVector(tangent, 34).addScaledVector(UP, 0.4);
-    const destination = getBodyPosition(frame.state.destination, ephemerisDay);
-    const arrivalBlend = THREE.MathUtils.smoothstep(progress, 0.82, 0.985);
-    lookTarget.lerp(new THREE.Vector3(destination.x, destination.y, destination.z), arrivalBlend);
+    routeCamera.lerp(departureCamera, departureAmount);
+
+    const destinationPosition = getBodyPosition(frame.state.destination, ephemerisDay);
+    const destination = new THREE.Vector3(destinationPosition.x, destinationPosition.y, destinationPosition.z);
+    const destinationEntry = bodyEntries.get(frame.state.destination);
+    const destinationRadius = destinationEntry?.displayRadius || 2;
+    const finalTangent = routeCurve.getTangentAt(0.999).normalize();
+    const finalSide = new THREE.Vector3().crossVectors(finalTangent, UP);
+    if (finalSide.lengthSq() < 0.0001) finalSide.copy(side);
+    else finalSide.normalize();
+    const arrivalDistance = destinationRadius * (destinationEntry?.body.ringed ? 8.2 : 5.2) + 9;
+    const arrivalCamera = destination
+      .clone()
+      .addScaledVector(finalTangent, -arrivalDistance)
+      .addScaledVector(UP, destinationRadius * 0.72 + 2)
+      .addScaledVector(finalSide, destinationRadius * 0.9 + 1.8);
+    const arrivalStep = THREE.MathUtils.smoothstep(progress, 0.58, 0.995);
+    const arrivalBlend = arrivalStep * arrivalStep * (3 - 2 * arrivalStep);
+    desiredCamera.copy(routeCamera).lerp(arrivalCamera, arrivalBlend);
+
+    const remainingDistance = point.distanceTo(destination);
+    const cruiseLookDistance = Math.min(34, Math.max(4, remainingDistance * 0.72));
+    lookTarget.copy(point).addScaledVector(tangent, cruiseLookDistance).addScaledVector(UP, 0.4);
+    const arrivalTarget = destination.clone().addScaledVector(UP, destinationRadius * 0.06);
+    const targetBlend = THREE.MathUtils.smoothstep(progress, 0.5, 0.9);
+    lookTarget.lerp(arrivalTarget, targetBlend);
     const departureLook = origin.clone().addScaledVector(UP, originRadius * 0.12);
     lookTarget.lerp(departureLook, departureAmount);
-    const amount = 1 - Math.exp(-frame.dt * 6.8);
+    const response = 3.1 + (1 - departureAmount) * 2 - arrivalBlend * 0.7;
+    const amount = 1 - Math.exp(-frame.dt * response);
     camera.position.lerp(desiredCamera, amount);
     currentTarget.lerp(lookTarget, amount);
     camera.up.set(0, 1, 0);
     camera.lookAt(currentTarget);
-    camera.fov = THREE.MathUtils.lerp(camera.fov, width <= 760 ? 63 : 56, amount);
-    camera.updateProjectionMatrix();
-  }
-
-  function updateArrivalCamera(frame) {
-    const entry = bodyEntries.get(frame.state.destination);
-    const position = getBodyPosition(frame.state.destination, frame.ephemerisDay ?? frame.state.day);
-    const destination = new THREE.Vector3(position.x, position.y, position.z);
-    const radius = entry?.displayRadius || 2;
-    desiredCamera.copy(destination).add(new THREE.Vector3(radius * 3.8 + 7, radius * 1.1 + 2, radius * 4.6 + 9));
-    const amount = 1 - Math.exp(-frame.dt * 3.2);
-    camera.position.lerp(desiredCamera, amount);
-    currentTarget.lerp(destination, amount);
-    camera.up.set(0, 1, 0);
-    camera.lookAt(currentTarget);
-    camera.fov = THREE.MathUtils.lerp(camera.fov, width <= 760 ? 52 : 42, amount);
+    const cruiseFov = width <= 760 ? 63 : 56;
+    const arrivalFov = width <= 760 ? 50 : 42;
+    camera.fov = THREE.MathUtils.lerp(camera.fov, THREE.MathUtils.lerp(cruiseFov, arrivalFov, arrivalBlend), amount);
     camera.updateProjectionMatrix();
   }
 
@@ -1039,10 +1051,11 @@ function updateCockpitStreaks(frame, streaks) {
   if (!active) return;
   const routeProgress = frame.state.missionActive || frame.state.routeProgress > 0 ? frame.state.routeProgress : 0.015;
   const warpActive = frame.state.experienceMode === "fantasy" && frame.state.travelMode === "warp";
+  const arrivalSlowdown = 1 - THREE.MathUtils.smoothstep(routeProgress, 0.65, 0.985);
   streaks.lines.material.color.set(warpActive ? 0xd5a8ff : 0xb9d7e0);
   streaks.lines.material.opacity =
-    0.12 + THREE.MathUtils.smoothstep(routeProgress, 0.05, 0.28) * (warpActive ? 0.62 : 0.3);
-  const boost = (frame.state.missionActive ? 1.7 : 0.85) * (warpActive ? 4.2 : 1);
+    0.05 + THREE.MathUtils.smoothstep(routeProgress, 0.05, 0.28) * (warpActive ? 0.62 : 0.3) * arrivalSlowdown;
+  const boost = (frame.state.missionActive ? 1.7 : 0.35) * (warpActive ? 4.2 : 1) * (0.16 + arrivalSlowdown * 0.84);
   for (let index = 0; index < streaks.count; index += 1) {
     const offset = index * 6;
     const step = frame.dt * streaks.speeds[index] * boost;
