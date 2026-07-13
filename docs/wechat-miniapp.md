@@ -7,7 +7,9 @@
 ```text
 core/
   bodies        天体、地点、港口、景点数据
-  ephemeris     简化星体运动与时间系统
+  ephemeris     JPL 星历读取、插值与简化星体运动
+  astrodynamics Lambert、Δv、C3 与轨迹采样
+  energy        矿脉、库存、采集与能源消耗
   vehicles      交通工具能力模型
   planner       路线生成、评分、风险、耗时
   formatting    日期、距离、耗时格式化
@@ -29,6 +31,7 @@ ui/
 - 小程序 WebGL Canvas
 - `threejs-miniprogram` 或等价 Three.js 适配层
 - 星球贴图、飞船模型按分包或远程资产缓存加载
+- JPL 星历按天体拆包；只下载当前路线端点和必要母行星
 
 可选降级：
 
@@ -49,6 +52,7 @@ ui/
 
 - 不依赖 CDN，所有贴图和模型必须本地或后台下发后缓存
 - 控制首包大小，星球贴图、飞船、音效适合分包
+- 当前全量 JPL 星历约 12 MB，不应进入小程序首包，建议放到对象存储并按天体缓存
 - Canvas 标签不适合过多 DOM 叠加，标签绘制最好统一走 Canvas
 - 浏览器 DOM 标签层需要改成小程序 Cover View 或 WebGL Sprite
 - 触摸交互以单指旋转、双指缩放为主
@@ -60,6 +64,8 @@ ui/
 - `BODIES` 数据结构
 - `VEHICLES` 数据结构
 - `ROUTE_MODES` 数据结构
+- `ENERGY_TYPES` 与采集/消耗纯函数
+- `src/astrodynamics.js` 中不依赖 DOM 的 Lambert 和轨迹采样
 - `getBodyPosition`
 - `calculateWindowScore`
 - `resolveWaypoints`

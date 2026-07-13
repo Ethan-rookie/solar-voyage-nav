@@ -1793,3 +1793,422 @@ input[type="range"] {
     font-size: 20px;
   }
 }
+
+/* Dual navigation model and cockpit instrumentation */
+.mode-stack {
+  justify-self: end;
+  display: grid;
+  justify-items: end;
+  gap: 7px;
+}
+
+.experience-switch,
+.travel-mode {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid rgba(238, 244, 246, 0.15);
+  border-radius: 4px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.experience-button,
+.travel-mode-button {
+  min-width: 84px;
+  height: 30px;
+  padding: 0 10px;
+  color: #788389;
+  border: 0;
+  border-right: 1px solid rgba(238, 244, 246, 0.12);
+  border-radius: 0;
+  background: transparent;
+  font-size: 10px;
+}
+
+.experience-button:last-child,
+.travel-mode-button:last-child {
+  border-right: 0;
+}
+
+.experience-button.is-active,
+.travel-mode-button.is-active {
+  color: #101516;
+  background: var(--gold);
+}
+
+.section-tabs {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.solver-console,
+.energy-planner {
+  display: grid;
+  gap: 11px;
+  margin: 0 0 15px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.solver-console[hidden],
+.energy-planner[hidden] {
+  display: none;
+}
+
+.console-heading,
+.range-field > span,
+.throttle-control > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.console-heading span,
+.range-field span,
+.throttle-control span {
+  color: #718087;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+}
+
+.console-heading strong,
+.range-field b,
+.throttle-control b {
+  color: var(--cyan);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.range-field {
+  display: grid;
+  gap: 6px;
+}
+
+.solver-readout,
+.energy-plan-grid,
+.energy-inventory {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--line-soft);
+  background: var(--line-soft);
+}
+
+.solver-readout span,
+.energy-plan-grid span,
+.energy-item {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 8px 9px;
+  background: rgba(4, 7, 9, 0.94);
+}
+
+.solver-readout small,
+.energy-plan-grid small,
+.energy-item small,
+.mining-site small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.solver-readout b,
+.energy-plan-grid b,
+.energy-item b,
+.mining-site b {
+  overflow-wrap: anywhere;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 550;
+}
+
+.energy-inventory {
+  margin-bottom: 15px;
+}
+
+.energy-item i {
+  width: 12px;
+  height: 3px;
+  background: var(--energy-color, var(--gold));
+  box-shadow: 0 0 9px var(--energy-color, var(--gold));
+}
+
+.mining-site {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 13px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.collect-button {
+  width: 100%;
+}
+
+.app-shell.is-real .mode-group,
+.app-shell.is-real .energy-planner,
+.app-shell.is-real [data-panel="energy"] {
+  display: none;
+}
+
+.app-shell.is-real .route-model,
+.app-shell.is-real .eyebrow,
+.app-shell.is-real .space-label.is-route {
+  color: var(--cyan);
+}
+
+.app-shell.is-real .glance-mark,
+.app-shell.is-real .metric,
+.app-shell.is-real .route-panel {
+  border-color: rgba(94, 216, 255, 0.3);
+}
+
+.cockpit-console {
+  position: absolute;
+  z-index: 11;
+  left: 50%;
+  bottom: 98px;
+  width: min(720px, calc(100vw - 420px));
+  min-height: 126px;
+  display: none;
+  grid-template-columns: minmax(260px, 1fr) minmax(150px, 0.55fr) 90px 112px;
+  align-items: center;
+  gap: 15px;
+  padding: 14px 18px;
+  border-top: 1px solid rgba(145, 200, 209, 0.4);
+  border-bottom: 1px solid rgba(145, 200, 209, 0.18);
+  background: linear-gradient(90deg, rgba(2, 5, 8, 0.88), rgba(5, 10, 14, 0.7), rgba(2, 4, 7, 0.9));
+  transform: translateX(-50%);
+}
+
+.app-shell.is-cockpit .cockpit-console {
+  display: grid;
+}
+
+.cockpit-instruments {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.attitude-display {
+  position: relative;
+  width: 88px;
+  height: 88px;
+  border: 1px solid rgba(145, 200, 209, 0.38);
+  border-radius: 50%;
+  overflow: hidden;
+  background: linear-gradient(180deg, rgba(40, 93, 108, 0.3) 0 49%, rgba(92, 68, 42, 0.3) 51% 100%);
+}
+
+.attitude-display::before,
+.attitude-display::after,
+.attitude-display i {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  background: rgba(223, 246, 249, 0.58);
+  transform: translate(-50%, -50%);
+}
+
+.attitude-display::before {
+  width: 62px;
+  height: 1px;
+}
+
+.attitude-display::after {
+  width: 1px;
+  height: 62px;
+}
+
+.attitude-display i:first-child {
+  width: 18px;
+  height: 2px;
+  transform: translate(-34px, -1px);
+}
+
+.attitude-display i:nth-child(2) {
+  width: 18px;
+  height: 2px;
+  transform: translate(16px, -1px);
+}
+
+.attitude-display span {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 12px;
+  color: var(--cyan);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  text-align: center;
+}
+
+.instrument-readouts {
+  display: grid;
+  gap: 7px;
+}
+
+.instrument-readouts span {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.instrument-readouts small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.instrument-readouts b {
+  color: var(--text);
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  font-weight: 550;
+}
+
+.throttle-control {
+  display: grid;
+  gap: 8px;
+}
+
+.reactor-bars {
+  height: 72px;
+  display: flex;
+  align-items: end;
+  gap: 4px;
+}
+
+.reactor-bars i {
+  width: 7px;
+  height: var(--bar-height, 40%);
+  background: linear-gradient(180deg, var(--cyan), rgba(94, 216, 255, 0.16));
+  box-shadow: 0 0 9px rgba(94, 216, 255, 0.2);
+}
+
+.reactor-bars i:nth-child(2) { height: 58%; }
+.reactor-bars i:nth-child(3) { height: 76%; }
+.reactor-bars i:nth-child(4) { height: 92%; }
+.reactor-bars i:nth-child(5) { height: 84%; }
+.reactor-bars i:nth-child(6) { height: 67%; }
+.reactor-bars i:nth-child(7) { height: 48%; }
+.reactor-bars i:nth-child(8) { height: 31%; }
+
+.warp-control {
+  min-height: 72px;
+  padding: 8px;
+  color: #dffcff;
+  border: 1px solid rgba(94, 216, 255, 0.48);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(94, 216, 255, 0.22), rgba(5, 9, 13, 0.94) 66%);
+  box-shadow: inset 0 0 18px rgba(94, 216, 255, 0.12), 0 0 18px rgba(94, 216, 255, 0.12);
+  font-size: 11px;
+}
+
+.warp-control.is-ready {
+  color: #151006;
+  border-color: var(--gold);
+  background: var(--gold);
+  box-shadow: 0 0 28px rgba(241, 183, 92, 0.45);
+}
+
+.app-shell.is-real .warp-control {
+  opacity: 0.38;
+  pointer-events: none;
+}
+
+@media (max-width: 1120px) {
+  .cockpit-console {
+    width: min(620px, calc(100vw - 80px));
+    grid-template-columns: minmax(230px, 1fr) minmax(130px, 0.55fr) 80px;
+  }
+
+  .warp-control {
+    display: none;
+  }
+}
+
+@media (max-width: 760px) {
+  .topbar {
+    min-height: 154px;
+  }
+
+  .mode-stack {
+    position: absolute;
+    right: 12px;
+    top: 13px;
+  }
+
+  .mode-stack .mission-status {
+    display: none;
+  }
+
+  .experience-button {
+    min-width: 70px;
+    height: 28px;
+    padding: 0 7px;
+    font-size: 9px;
+  }
+
+  .route-glance,
+  .map-toolbar {
+    top: 166px;
+  }
+
+  .view-strip {
+    top: 260px;
+  }
+
+  .app-shell.is-cockpit .view-strip {
+    top: 302px;
+  }
+
+  .cockpit-hud {
+    top: 168px;
+  }
+
+  .cockpit-console {
+    left: 10px;
+    right: 10px;
+    bottom: 84px;
+    width: auto;
+    min-height: 94px;
+    grid-template-columns: minmax(0, 1fr) 112px;
+    gap: 10px;
+    padding: 9px 10px;
+    transform: none;
+  }
+
+  .cockpit-instruments {
+    grid-template-columns: 66px minmax(0, 1fr);
+    gap: 8px;
+  }
+
+  .attitude-display {
+    width: 64px;
+    height: 64px;
+  }
+
+  .attitude-display::before {
+    width: 46px;
+  }
+
+  .attitude-display::after {
+    height: 46px;
+  }
+
+  .throttle-control {
+    min-width: 0;
+  }
+
+  .reactor-bars,
+  .warp-control {
+    display: none;
+  }
+}

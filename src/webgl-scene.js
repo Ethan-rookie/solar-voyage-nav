@@ -959,8 +959,11 @@ function updateCockpitStreaks(frame, streaks) {
   streaks.lines.visible = active;
   if (!active) return;
   const routeProgress = frame.state.missionActive || frame.state.routeProgress > 0 ? frame.state.routeProgress : 0.015;
-  streaks.lines.material.opacity = 0.12 + THREE.MathUtils.smoothstep(routeProgress, 0.05, 0.28) * 0.3;
-  const boost = frame.state.missionActive ? 1.7 : 0.85;
+  const warpActive = frame.state.experienceMode === "fantasy" && frame.state.travelMode === "warp";
+  streaks.lines.material.color.set(warpActive ? 0xd5a8ff : 0xb9d7e0);
+  streaks.lines.material.opacity =
+    0.12 + THREE.MathUtils.smoothstep(routeProgress, 0.05, 0.28) * (warpActive ? 0.62 : 0.3);
+  const boost = (frame.state.missionActive ? 1.7 : 0.85) * (warpActive ? 4.2 : 1);
   for (let index = 0; index < streaks.count; index += 1) {
     const offset = index * 6;
     const step = frame.dt * streaks.speeds[index] * boost;

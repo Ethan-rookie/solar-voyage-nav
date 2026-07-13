@@ -30,9 +30,15 @@
             <select id="destinationSelect"></select>
           </label>
         </div>
-        <div class="mission-status" aria-label="导航链路状态">
-          <span class="status-dot"></span>
-          <span>导航链路 · 已同步</span>
+        <div class="mode-stack">
+          <div class="experience-switch" aria-label="体验模式">
+            <button class="experience-button" data-experience="real" type="button">真实航天</button>
+            <button class="experience-button is-active" data-experience="fantasy" type="button">跃迁探索</button>
+          </div>
+          <div class="mission-status" aria-label="导航链路状态">
+            <span class="status-dot"></span>
+            <span id="dataStatus">娱乐航行模型</span>
+          </div>
         </div>
       </header>
 
@@ -42,6 +48,7 @@
           <button class="tab" data-panel="vehicle" type="button">载具</button>
           <button class="tab" data-panel="timing" type="button">时机</button>
           <button class="tab" data-panel="place" type="button">地点</button>
+          <button class="tab" data-panel="energy" type="button">能源</button>
         </nav>
 
         <section class="panel-section" data-panel-view="route">
@@ -51,6 +58,22 @@
             <p class="route-model" id="routeModel">简化霍曼转移 · 娱乐导航估算</p>
           </div>
           <div class="metrics-grid" id="routeMetrics"></div>
+          <section class="solver-console" id="realSolver" hidden>
+            <div class="console-heading"><span>JPL / LAMBERT</span><strong id="solverStatus">等待星历</strong></div>
+            <label class="range-field">
+              <span>转移时间 <b id="flightDaysValue">260 天</b></span>
+              <input id="flightDays" type="range" min="30" max="1600" value="260" step="5" />
+            </label>
+            <div class="solver-readout" id="solverReadout"></div>
+          </section>
+          <section class="energy-planner" id="energyPlanner">
+            <div class="console-heading"><span>ENERGY PLAN</span><strong id="energyPlanStatus">可启航</strong></div>
+            <div class="energy-plan-grid" id="energyPlanGrid"></div>
+            <div class="travel-mode" aria-label="航行方式">
+              <button class="travel-mode-button is-active" data-travel-mode="cruise" type="button">常规推进</button>
+              <button class="travel-mode-button" data-travel-mode="warp" type="button">空间跃迁</button>
+            </div>
+          </section>
           <div class="mode-group" id="modeGroup" aria-label="路线模式"></div>
           <div class="route-steps" id="routeSteps"></div>
         </section>
@@ -77,6 +100,16 @@
             <h2 id="placeTitle">地球</h2>
           </div>
           <div class="place-detail" id="placeDetail"></div>
+        </section>
+
+        <section class="panel-section is-hidden" data-panel-view="energy">
+          <div class="section-heading">
+            <p class="eyebrow">Resource</p>
+            <h2>矿石与能源</h2>
+          </div>
+          <div class="energy-inventory" id="energyInventory"></div>
+          <div class="mining-site" id="miningSite"></div>
+          <button class="primary-button collect-button" id="collectEnergy" type="button">采集当前矿脉</button>
         </section>
       </aside>
 
@@ -109,6 +142,25 @@
           <span><small>航程</small><b id="cockpitDistance">124 万公里</b></span>
         </div>
         <i><em id="cockpitProgress"></em></i>
+      </section>
+
+      <section class="cockpit-console" aria-label="飞行器操控台">
+        <div class="cockpit-instruments">
+          <div class="attitude-display" aria-hidden="true">
+            <i></i><i></i><span id="attitudeValue">+00.0°</span>
+          </div>
+          <div class="instrument-readouts">
+            <span><small>推进器</small><b id="engineMode">巡航推进</b></span>
+            <span><small>反应堆</small><b id="reactorValue">82%</b></span>
+            <span><small>当前能源</small><b id="cockpitFuel">6.0 u</b></span>
+          </div>
+        </div>
+        <label class="throttle-control">
+          <span>THROTTLE <b id="throttleValue">62%</b></span>
+          <input id="throttle" type="range" min="20" max="100" value="62" step="1" />
+        </label>
+        <div class="reactor-bars" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+        <button class="warp-control" id="warpControl" type="button">充能跃迁</button>
       </section>
 
       <div class="view-strip" aria-label="视角模式">

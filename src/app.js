@@ -1,4 +1,5 @@
 import { createSolarScene } from "./webgl-scene.js";
+import { AU_KM, createAstrodynamicsEngine } from "./astrodynamics.js";
 
 const TAU = Math.PI * 2;
 const BASE_DATE = new Date(Date.UTC(2042, 0, 1));
@@ -776,8 +777,52 @@ const ROUTE_MODES = [
   },
 ];
 
+const ENERGY_TYPES = {
+  helios: {
+    id: "helios",
+    name: "日珀晶",
+    color: "#ffd36c",
+    rangeAu: 0.24,
+    description: "吸收太阳风的内行星晶体",
+  },
+  ferrite: {
+    id: "ferrite",
+    name: "赤铁核",
+    color: "#ef8668",
+    rangeAu: 0.48,
+    description: "岩质天体中的高密度推进介质",
+  },
+  cryolite: {
+    id: "cryolite",
+    name: "冰脉晶",
+    color: "#8ee8f1",
+    rangeAu: 0.92,
+    description: "外行星卫星冰层中的低温燃料",
+  },
+  storm: {
+    id: "storm",
+    name: "雷暴氢晶",
+    color: "#9fb4ff",
+    rangeAu: 1.8,
+    description: "气态巨行星磁层凝聚能源",
+  },
+  warp: {
+    id: "warp",
+    name: "曲率晶核",
+    color: "#d5a8ff",
+    rangeAu: 6,
+    description: "假想的负压曲率场核心",
+  },
+};
+
 const state = {
   day: 260,
+  experienceMode: "fantasy",
+  travelMode: "cruise",
+  realFlightDays: 260,
+  astroStatus: "idle",
+  astroError: "",
+  throttle: 62,
   playing: false,
   timeScale: 1,
   origin: "earth",
@@ -788,6 +833,15 @@ const state = {
   viewMode: "overview",
   missionActive: false,
   routeProgress: 0,
+  missionFuelCommitted: false,
+  inventory: {
+    helios: 6,
+    ferrite: 4,
+    cryolite: 2.5,
+    storm: 1.4,
+    warp: 0.6,
+  },
+  deposits: Object.fromEntries(BODIES.filter((body) => body.id !== "sun").map((body) => [body.id, resolveDeposit(body).reserve])),
   camera: {
     yaw: -0.82,
     pitch: 0.72,
@@ -808,6 +862,7 @@ const state = {
 const bodyById = new Map(BODIES.map((body) => [body.id, body]));
 const vehicleById = new Map(VEHICLES.map((vehicle) => [vehicle.id, vehicle]));
 const modeById = new Map(ROUTE_MODES.map((mode) => [mode.id, mode]));
+const astrodynamics = createAstrodynamicsEngine();
 const textureCache = new Map();
 const texturePixelCache = new Map();
 const textureSphereCache = new Map();
@@ -816,12 +871,23 @@ const canvas = document.getElementById("spaceMap");
 const ctx = null;
 const elements = {
   appShell: document.querySelector(".app-shell"),
+  experienceButtons: [...document.querySelectorAll(".experience-button")],
+  dataStatus: document.getElementById("dataStatus"),
   originSelect: document.getElementById("originSelect"),
   destinationSelect: document.getElementById("destinationSelect"),
   swapRoute: document.getElementById("swapRoute"),
   routeTitle: document.getElementById("routeTitle"),
   routeModel: document.getElementById("routeModel"),
   routeMetrics: document.getElementById("routeMetrics"),
+  realSolver: document.getElementById("realSolver"),
+  solverStatus: document.getElementById("solverStatus"),
+  solverReadout: document.getElementById("solverReadout"),
+  flightDays: document.getElementById("flightDays"),
+  flightDaysValue: document.getElementById("flightDaysValue"),
+  energyPlanner: document.getElementById("energyPlanner"),
+  energyPlanStatus: document.getElementById("energyPlanStatus"),
+  energyPlanGrid: document.getElementById("energyPlanGrid"),
+  travelModeButtons: [...document.querySelectorAll(".travel-mode-button")],
   modeGroup: document.getElementById("modeGroup"),
   routeSteps: document.getElementById("routeSteps"),
   glanceMode: document.getElementById("glanceMode"),
@@ -838,6 +904,9 @@ const elements = {
   timingBoard: document.getElementById("timingBoard"),
   placeTitle: document.getElementById("placeTitle"),
   placeDetail: document.getElementById("placeDetail"),
+  energyInventory: document.getElementById("energyInventory"),
+  miningSite: document.getElementById("miningSite"),
+  collectEnergy: document.getElementById("collectEnergy"),
   tabs: [...document.querySelectorAll(".tab")],
   panelViews: [...document.querySelectorAll("[data-panel-view]")],
   viewButtons: [...document.querySelectorAll(".view-button")],
@@ -857,6 +926,13 @@ const elements = {
   cockpitDuration: document.getElementById("cockpitDuration"),
   cockpitDistance: document.getElementById("cockpitDistance"),
   cockpitProgress: document.getElementById("cockpitProgress"),
+  throttle: document.getElementById("throttle"),
+  throttleValue: document.getElementById("throttleValue"),
+  attitudeValue: document.getElementById("attitudeValue"),
+  engineMode: document.getElementById("engineMode"),
+  reactorValue: document.getElementById("reactorValue"),
+  cockpitFuel: document.getElementById("cockpitFuel"),
+  warpControl: document.getElementById("warpControl"),
 };
 
 let width = 0;
@@ -874,6 +950,7 @@ let pointer = {
   y: 0,
 };
 let screenBodies = [];
+let astroRequestToken = 0;
 
 const stars = Array.from({ length: 520 }, (_, index) => {
   const seed = Math.sin(index * 997.13) * 10000;
@@ -906,6 +983,7 @@ function setup() {
   renderModeButtons();
   renderVehicleList();
   bindEvents();
+  syncExperienceChrome();
   applyViewMode(state.viewMode);
   syncPanels();
   requestAnimationFrame(tick);
@@ -930,7 +1008,9 @@ function resizePlanetPreview() {
 }
 
 function populateRouteSelects() {
-  const routeBodies = BODIES.filter((body) => body.id !== "sun");
+  const routeBodies = BODIES.filter(
+    (body) => body.id !== "sun" && (state.experienceMode !== "real" || !body.region),
+  );
   for (const select of [elements.originSelect, elements.destinationSelect]) {
     select.innerHTML = "";
     for (const body of routeBodies) {
@@ -984,17 +1064,38 @@ function renderVehicleList() {
 }
 
 function bindEvents() {
+  elements.experienceButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      const nextMode = button.dataset.experience;
+      if (nextMode === state.experienceMode) return;
+      state.experienceMode = nextMode;
+      state.missionActive = false;
+      state.missionFuelCommitted = false;
+      state.routeProgress = 0;
+      if (nextMode === "real" && (bodyById.get(state.origin)?.region || bodyById.get(state.destination)?.region)) {
+        state.origin = "earth";
+        state.destination = "mars";
+      }
+      populateRouteSelects();
+      syncExperienceChrome();
+      elements.tabs.find((tab) => tab.dataset.panel === "route")?.click();
+      syncPanels();
+      if (nextMode === "real") ensureAstrodynamicsData();
+    });
+  });
   elements.originSelect.addEventListener("change", () => {
     state.origin = elements.originSelect.value;
     state.selectedBody = state.origin;
     state.routeProgress = 0;
     syncPanels();
+    ensureAstrodynamicsData();
   });
   elements.destinationSelect.addEventListener("change", () => {
     state.destination = elements.destinationSelect.value;
     state.selectedBody = state.destination;
     state.routeProgress = 0;
     syncPanels();
+    ensureAstrodynamicsData();
   });
   elements.swapRoute.addEventListener("click", () => {
     [state.origin, state.destination] = [state.destination, state.origin];
@@ -1002,6 +1103,7 @@ function bindEvents() {
     state.routeProgress = 0;
     populateRouteSelects();
     syncPanels();
+    ensureAstrodynamicsData();
   });
   elements.tabs.forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -1046,16 +1148,32 @@ function bindEvents() {
     state.routeProgress = 0;
     syncPanels();
   });
+  elements.flightDays.addEventListener("input", () => {
+    state.realFlightDays = Number(elements.flightDays.value);
+    state.routeProgress = 0;
+    syncPanels();
+  });
+  elements.travelModeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      state.travelMode = button.dataset.travelMode;
+      syncPanels();
+    });
+  });
+  elements.throttle.addEventListener("input", () => {
+    state.throttle = Number(elements.throttle.value);
+    updateCockpitConsole(buildRoute());
+  });
+  elements.collectEnergy.addEventListener("click", collectCurrentEnergy);
+  elements.warpControl.addEventListener("click", () => {
+    if (state.experienceMode === "real") return;
+    state.travelMode = "warp";
+    syncPanels();
+    if (!state.missionActive) startMission();
+  });
   elements.timeScale.addEventListener("change", () => {
     state.timeScale = Number(elements.timeScale.value);
   });
-  elements.launchButton.addEventListener("click", () => {
-    state.missionActive = !state.missionActive;
-    if (state.missionActive && state.routeProgress >= 1) {
-      state.routeProgress = 0;
-    }
-    elements.launchButton.textContent = state.missionActive ? "巡航中" : "启航";
-  });
+  elements.launchButton.addEventListener("click", startMission);
   canvas.addEventListener("pointerdown", (event) => {
     pointer.dragging = true;
     pointer.moved = false;
@@ -1099,21 +1217,40 @@ function syncPanels() {
   elements.originSelect.value = state.origin;
   elements.destinationSelect.value = state.destination;
   elements.routeTitle.textContent = `${origin.name}到${destination.name}`;
-  elements.routeModel.textContent = `${route.transferLabel} · 娱乐导航估算`;
-  elements.routeMetrics.innerHTML = [
-    metric("预计耗时", formatDuration(route.durationDays)),
-    metric("航程", `${Math.round(route.displayDistance)} 万公里`),
-    metric("窗口评分", `${route.windowScore}/100`),
-    metric("风险", route.riskLabel),
-  ].join("");
-  elements.glanceMode.textContent = `${modeById.get(state.mode).name} · ${vehicle.name} · ${route.transferLabel}`;
+  const realMode = state.experienceMode === "real";
+  elements.routeModel.textContent = realMode
+    ? `${route.transferLabel} · 日心黄道 J2000`
+    : `${route.transferLabel} · 能源与跃迁模拟`;
+  elements.routeMetrics.innerHTML = realMode
+    ? [
+        metric("转移时间", formatDuration(route.durationDays)),
+        metric("总 Δv", route.realSolution ? `${route.realSolution.totalDeltaV.toFixed(2)} km/s` : "等待解算"),
+        metric("端点距离", `${route.distanceAu.toFixed(2)} au`),
+        metric("C3", route.realSolution ? `${route.realSolution.c3.toFixed(1)} km²/s²` : "—"),
+      ].join("")
+    : [
+        metric("预计耗时", formatDuration(route.durationDays)),
+        metric("航程", `${route.distanceAu.toFixed(2)} au`),
+        metric("能源消耗", `${route.energyPlan.required.toFixed(2)} u`),
+        metric("风险", route.riskLabel),
+      ].join("");
+  elements.glanceMode.textContent = realMode
+    ? `真实航天 · ${route.transferLabel}`
+    : `${state.travelMode === "warp" ? "空间跃迁" : modeById.get(state.mode).name} · ${vehicle.name}`;
   elements.glanceTitle.textContent = `${origin.name} → ${destination.name}`;
   elements.glanceDuration.textContent = formatDuration(route.durationDays);
-  elements.glanceDistance.textContent = `${Math.round(route.displayDistance)} 万公里`;
-  elements.glanceWindow.textContent = `${route.windowScore}/100`;
+  elements.glanceDistance.textContent = `${route.distanceAu.toFixed(2)} au`;
+  elements.glanceWindow.textContent = realMode
+    ? route.realSolution
+      ? `${route.realSolution.totalDeltaV.toFixed(1)} Δv`
+      : "星历加载"
+    : `${route.energyPlan.required.toFixed(1)} u`;
   elements.glanceOrigin.textContent = origin.name;
   elements.glanceDestination.textContent = destination.name;
   updatePlanetPreviewMeta(destination);
+  renderSolver(route);
+  renderEnergyPlanner(route);
+  renderEnergyInventory();
 
   elements.routeSteps.innerHTML = route.waypoints
     .map((id, index) => {
@@ -1137,6 +1274,7 @@ function syncPanels() {
 
   renderTiming(route, vehicle);
   renderPlaceDetail();
+  updateCockpitConsole(route);
   lastPanelSyncDay = state.day;
 }
 
@@ -1144,7 +1282,206 @@ function metric(label, value) {
   return `<div class="metric"><span>${label}</span><strong>${value}</strong></div>`;
 }
 
+function syncExperienceChrome() {
+  const realMode = state.experienceMode === "real";
+  elements.appShell.classList.toggle("is-real", realMode);
+  elements.experienceButtons.forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.experience === state.experienceMode);
+  });
+  elements.realSolver.hidden = !realMode;
+  elements.energyPlanner.hidden = realMode;
+  elements.dataStatus.textContent = realMode
+    ? state.astroStatus === "ready"
+      ? "JPL DE441 · 星历已锁定"
+      : state.astroStatus === "error"
+        ? "星历数据不可用"
+        : "正在同步 JPL 星历"
+    : "曲率能源模拟";
+}
+
+async function ensureAstrodynamicsData() {
+  if (state.experienceMode !== "real") return;
+  const token = ++astroRequestToken;
+  state.astroStatus = "loading";
+  state.astroError = "";
+  syncExperienceChrome();
+  const routeBodies = new Set([state.origin, state.destination]);
+  for (const id of [...routeBodies]) {
+    const parent = bodyById.get(id)?.parent;
+    if (parent && parent !== "sun") routeBodies.add(parent);
+  }
+  try {
+    await astrodynamics.loadBodies([...routeBodies]);
+    if (token !== astroRequestToken) return;
+    state.astroStatus = "ready";
+  } catch (error) {
+    if (token !== astroRequestToken) return;
+    state.astroStatus = "error";
+    state.astroError = error.message;
+  }
+  syncExperienceChrome();
+  syncPanels();
+}
+
+function renderSolver(route) {
+  if (state.experienceMode !== "real") return;
+  const maxFlightDays = Math.max(30, Math.min(1600, 2400 - Math.ceil(state.day)));
+  elements.flightDays.max = maxFlightDays;
+  elements.flightDays.value = route.durationDays;
+  elements.flightDaysValue.textContent = `${route.durationDays} 天`;
+  if (state.astroStatus === "loading") {
+    elements.solverStatus.textContent = "载入 JPL 星历";
+    elements.solverReadout.innerHTML = solverItem("数据源", "NASA/JPL Horizons") + solverItem("状态", "同步中");
+    return;
+  }
+  if (!route.realSolution) {
+    elements.solverStatus.textContent = state.astroStatus === "error" ? "星历错误" : "等待解算";
+    elements.solverReadout.innerHTML =
+      solverItem("数据源", state.astroError || "NASA/JPL Horizons") + solverItem("建议", "调整转移时间");
+    return;
+  }
+  const solution = route.realSolution;
+  elements.solverStatus.textContent = "Lambert 已收敛";
+  elements.solverReadout.innerHTML = [
+    solverItem("出发 Δv", `${solution.departureDeltaV.toFixed(2)} km/s`),
+    solverItem("到达 Δv", `${solution.arrivalDeltaV.toFixed(2)} km/s`),
+    solverItem("星历采样", `${solution.sampleStepDays} 天`),
+    solverItem("数据源", solution.source.replace("NASA/JPL Horizons · ", "")),
+  ].join("");
+}
+
+function solverItem(label, value) {
+  return `<span><small>${label}</small><b>${value}</b></span>`;
+}
+
+function renderEnergyPlanner(route) {
+  if (state.experienceMode === "real") return;
+  const plan = route.energyPlan;
+  const energy = ENERGY_TYPES[plan.energyId];
+  const available = state.inventory[plan.energyId] || 0;
+  elements.energyPlanStatus.textContent = plan.canAfford ? "储量充足" : "需要采集";
+  elements.energyPlanGrid.innerHTML = [
+    solverItem("推进能源", energy.name),
+    solverItem("单位航程", `${energy.rangeAu.toFixed(2)} au`),
+    solverItem("本次需要", `${plan.required.toFixed(2)} u`),
+    solverItem("库存", `${available.toFixed(2)} u`),
+  ].join("");
+  elements.travelModeButtons.forEach((button) => {
+    button.classList.toggle("is-active", button.dataset.travelMode === state.travelMode);
+  });
+}
+
+function renderEnergyInventory() {
+  const miningBody = getMiningBody();
+  const deposit = resolveDeposit(miningBody);
+  elements.energyInventory.innerHTML = Object.values(ENERGY_TYPES)
+    .map(
+      (energy) => `
+        <span class="energy-item" style="--energy-color:${energy.color}">
+          <i></i><small>${energy.name}</small><b>${(state.inventory[energy.id] || 0).toFixed(2)} u</b>
+        </span>
+      `,
+    )
+    .join("");
+  const reserve = state.deposits[miningBody.id] || 0;
+  elements.miningSite.innerHTML = `
+    <small>当前采集点 · ${miningBody.name}</small>
+    <b>${ENERGY_TYPES[deposit.energyId].name}</b>
+    <small>剩余 ${reserve.toFixed(1)} u · 单次采集 ${deposit.yield.toFixed(1)} u · 每单位可飞 ${ENERGY_TYPES[deposit.energyId].rangeAu} au</small>
+  `;
+  elements.collectEnergy.disabled = reserve <= 0 || state.experienceMode === "real";
+}
+
+function collectCurrentEnergy() {
+  if (state.experienceMode === "real") return;
+  const body = getMiningBody();
+  const deposit = resolveDeposit(body);
+  const reserve = state.deposits[body.id] || 0;
+  const amount = Math.min(reserve, deposit.yield);
+  if (amount <= 0) return;
+  state.deposits[body.id] = reserve - amount;
+  state.inventory[deposit.energyId] = (state.inventory[deposit.energyId] || 0) + amount;
+  elements.dataStatus.textContent = `${body.name} · 已采集 ${amount.toFixed(1)} u ${ENERGY_TYPES[deposit.energyId].name}`;
+  syncPanels();
+}
+
+function getMiningBody() {
+  return state.routeProgress >= 1 ? bodyById.get(state.destination) : bodyById.get(state.origin);
+}
+
+function startMission() {
+  if (state.missionActive) {
+    state.missionActive = false;
+    elements.launchButton.textContent = "继续航行";
+    return;
+  }
+  const route = buildRoute();
+  if (state.experienceMode === "real" && !route.realSolution) {
+    elements.dataStatus.textContent = "Lambert 尚未收敛，不能启航";
+    return;
+  }
+  if (state.routeProgress >= 1) {
+    state.routeProgress = 0;
+    state.missionFuelCommitted = false;
+  }
+  if (state.experienceMode === "fantasy" && !state.missionFuelCommitted) {
+    const plan = route.energyPlan;
+    if (!plan.canAfford) {
+      elements.dataStatus.textContent = `缺少 ${ENERGY_TYPES[plan.energyId].name}，请先采集`;
+      const energyTab = elements.tabs.find((tab) => tab.dataset.panel === "energy");
+      energyTab?.click();
+      return;
+    }
+    state.inventory[plan.energyId] -= plan.required;
+    state.missionFuelCommitted = true;
+  }
+  state.missionActive = true;
+  state.viewMode = "cockpit";
+  applyViewMode("cockpit");
+  elements.launchButton.textContent = state.travelMode === "warp" && state.experienceMode === "fantasy" ? "跃迁中" : "巡航中";
+  syncPanels();
+}
+
+function updateCockpitConsole(route) {
+  const progress = clamp(state.routeProgress, 0, 1);
+  const reactor = clamp(Math.round(96 - progress * 42 - (state.travelMode === "warp" ? 12 : 0)), 24, 99);
+  const angle = Math.sin(sceneTime * 0.7) * (state.missionActive ? 4.8 : 1.2);
+  elements.throttle.value = state.throttle;
+  elements.throttleValue.textContent = `${state.throttle}%`;
+  elements.attitudeValue.textContent = `${angle >= 0 ? "+" : ""}${angle.toFixed(1)}°`;
+  elements.engineMode.textContent = state.experienceMode === "real" ? "Lambert 惯性航行" : state.travelMode === "warp" ? "曲率场推进" : "聚变巡航";
+  elements.reactorValue.textContent = `${reactor}%`;
+  const plan = route.energyPlan || { energyId: "helios" };
+  elements.cockpitFuel.textContent = state.experienceMode === "real" ? `${route.realSolution?.totalDeltaV.toFixed(1) || "—"} km/s` : `${(state.inventory[plan.energyId] || 0).toFixed(2)} u`;
+  elements.warpControl.classList.toggle("is-ready", state.experienceMode === "fantasy" && state.travelMode === "warp" && route.energyPlan.canAfford);
+  elements.warpControl.textContent = state.travelMode === "warp" ? (state.missionActive ? "跃迁锁定" : "启动跃迁") : "充能跃迁";
+}
+
 function renderTiming(route, vehicle) {
+  if (state.experienceMode === "real") {
+    const candidates = [-60, -20, 0, 30, 75]
+      .map((offset) => {
+        const day = clamp(Math.round(state.day + offset), 0, 2400 - route.durationDays);
+        const solution = astrodynamics.solveRoute(state.origin, state.destination, day, route.durationDays);
+        return { day, solution };
+      })
+      .filter((item) => item.solution)
+      .sort((a, b) => a.solution.totalDeltaV - b.solution.totalDeltaV)
+      .slice(0, 4);
+    elements.timingBoard.innerHTML = candidates.length
+      ? candidates
+          .map(
+            (item) => `
+              <div class="timing-item">
+                <span><strong>${formatDate(item.day)}</strong><span>Lambert · ${item.solution.totalDeltaV.toFixed(2)} km/s</span></span>
+                <span class="timing-score">Δv</span>
+              </div>
+            `,
+          )
+          .join("")
+      : `<div class="timing-item"><span><strong>等待星历</strong><span>加载后计算最低 Δv 窗口</span></span></div>`;
+    return;
+  }
   const candidates = [-90, -30, 0, 45, 120].map((offset) => {
     const day = clamp(Math.round(state.day + offset), 0, 2400);
     const score = calculateWindowScore(state.origin, state.destination, day, state.mode);
@@ -1166,6 +1503,8 @@ function renderTiming(route, vehicle) {
 
 function renderPlaceDetail() {
   const body = bodyById.get(state.selectedBody) || bodyById.get(state.destination);
+  const deposit = resolveDeposit(body);
+  const energy = ENERGY_TYPES[deposit.energyId];
   elements.placeTitle.textContent = body.name;
   const rows = [
     ["类型", body.family],
@@ -1173,6 +1512,7 @@ function renderPlaceDetail() {
     ["大气", body.atmosphere],
     ["港口", body.port],
     ["看点", body.tags.join(" · ")],
+    ["能源矿脉", `${energy.name} · ${energy.rangeAu} au/u`],
   ];
   elements.placeDetail.innerHTML = rows
     .map(
@@ -1209,16 +1549,22 @@ function tick(now) {
   }
   const route = buildRoute();
   if (state.missionActive) {
-    state.routeProgress += dt / Math.max(route.durationDays / 18, 8);
+    const throttleFactor = state.throttle / 62;
+    const warpFactor = state.experienceMode === "fantasy" && state.travelMode === "warp" ? 4.6 : 1;
+    state.routeProgress += (dt * throttleFactor * warpFactor) / Math.max(route.durationDays / 18, 8);
     if (state.routeProgress >= 1) {
       state.routeProgress = 1;
       state.missionActive = false;
+      state.missionFuelCommitted = false;
       elements.launchButton.textContent = "启航";
+      elements.dataStatus.textContent = `已抵达 ${bodyById.get(state.destination).name} · 可开始采集`;
+      renderEnergyInventory();
     }
   }
   elements.dateChip.textContent = formatDate(state.day);
   const routePoints = getRouteCurvePoints(route);
   updateCockpitHud(route);
+  updateCockpitConsole(route);
   webglScene?.render({
     state,
     route,
@@ -1238,7 +1584,7 @@ function updateCockpitHud(route) {
   elements.cockpitTitle.textContent = progress < 0.08 ? `离港 · ${origin.port}` : `前往${destination.name}`;
   elements.cockpitRemaining.textContent = formatDuration(route.durationDays * (1 - progress));
   elements.cockpitDuration.textContent = formatDuration(route.durationDays);
-  elements.cockpitDistance.textContent = `${Math.round(route.displayDistance)} 万公里`;
+  elements.cockpitDistance.textContent = `${route.distanceAu.toFixed(2)} au`;
   elements.cockpitProgress.style.width = `${Math.max(4, progress * 100)}%`;
 }
 
@@ -2618,6 +2964,31 @@ function drawShip(routePoints) {
 function buildRoute(day = state.day) {
   const vehicle = vehicleById.get(state.vehicle);
   const mode = modeById.get(state.mode);
+  if (state.experienceMode === "real") {
+    const waypoints = [state.origin, state.destination];
+    const flightDays = Math.min(state.realFlightDays, Math.max(30, 2400 - Math.ceil(day)));
+    const realSolution = astrodynamics.solveRoute(state.origin, state.destination, day, flightDays);
+    const positions = waypoints.map((id) => getBodyPosition(id, day));
+    const sceneDistanceAu = distance3(positions[0], positions[1]) / 70;
+    const distanceAu = realSolution?.spanAu || sceneDistanceAu;
+    const totalDeltaV = realSolution?.totalDeltaV || 0;
+    const riskValue = realSolution ? clamp(Math.round(totalDeltaV * 3.2), 8, 96) : 75;
+    return {
+      waypoints,
+      directDistance: distanceAu * 70,
+      distance: distanceAu * 70,
+      distanceAu,
+      displayDistance: (distanceAu * AU_KM) / 10000,
+      durationDays: flightDays,
+      windowScore: realSolution ? clamp(Math.round(100 - totalDeltaV * 2.2), 1, 100) : 0,
+      scenicScore: 50,
+      riskValue,
+      riskLabel: riskValue > 68 ? "高" : riskValue > 38 ? "中" : "低",
+      transferLabel: "JPL 星历 · Lambert 解算",
+      realSolution,
+      energyPlan: null,
+    };
+  }
   const waypoints = resolveWaypoints(state.origin, state.destination, state.mode, vehicle.id);
   const positions = waypoints.map((id) => getBodyPosition(id, day));
   const directDistance = positions.reduce((sum, point, index) => {
@@ -2634,7 +3005,7 @@ function buildRoute(day = state.day) {
     5,
     92,
   );
-  return {
+  const route = {
     waypoints,
     directDistance,
     distance,
@@ -2646,6 +3017,51 @@ function buildRoute(day = state.day) {
     riskLabel: riskValue > 68 ? "高" : riskValue > 38 ? "中" : "低",
     transferLabel: resolveTransferLabel(waypoints),
   };
+  route.distanceAu = route.distance / 70;
+  route.energyPlan = calculateEnergyPlan(route, vehicle);
+  if (state.travelMode === "warp") {
+    route.durationDays = Math.max(0.5, route.distanceAu * 0.36 + 0.4);
+    route.transferLabel = "曲率晶核跃迁";
+    route.riskValue = clamp(route.riskValue + 18, 5, 96);
+    route.riskLabel = route.riskValue > 68 ? "高" : route.riskValue > 38 ? "中" : "低";
+  }
+  return route;
+}
+
+function calculateEnergyPlan(route, vehicle) {
+  const energyId = state.travelMode === "warp" ? "warp" : resolveDeposit(bodyById.get(state.origin)).energyId;
+  const energy = ENERGY_TYPES[energyId];
+  const vehicleEfficiency = 0.82 + vehicle.comfort / 260;
+  const ignition = state.travelMode === "warp" ? 0.35 : 0.08;
+  const required = route.distanceAu / (energy.rangeAu * vehicleEfficiency) + ignition;
+  return {
+    energyId,
+    required,
+    canAfford: (state.inventory[energyId] || 0) >= required,
+  };
+}
+
+function resolveDeposit(body) {
+  let primary = body;
+  while (primary?.parent && primary.parent !== "sun") {
+    primary = BODIES.find((candidate) => candidate.id === primary.parent);
+  }
+  let energyId = "ferrite";
+  if (body?.region || primary?.region) {
+    energyId = "warp";
+  } else if (["mercury", "venus"].includes(primary?.id)) {
+    energyId = "helios";
+  } else if (["jupiter", "saturn", "uranus", "neptune"].includes(body?.id)) {
+    energyId = "storm";
+  } else if (body?.family === "卫星" && (primary?.orbitRadius || 0) >= 180) {
+    energyId = "cryolite";
+  } else if ((primary?.orbitRadius || 0) >= 500) {
+    energyId = "warp";
+  }
+  const seed = [...(body?.id || "sun")].reduce((sum, character) => sum + character.charCodeAt(0), 0);
+  const reserve = Number((8 + (body?.priority || 1) * 1.7 + (seed % 11) * 0.65).toFixed(1));
+  const yieldAmount = Number((0.8 + (seed % 6) * 0.18).toFixed(1));
+  return { energyId, reserve, yield: yieldAmount };
 }
 
 function estimateTransferDistance(waypoints, positions, windowScore) {
@@ -2706,6 +3122,9 @@ function resolveWaypoints(origin, destination, mode, vehicleId) {
 }
 
 function getRouteCurvePoints(route) {
+  if (state.experienceMode === "real" && route.realSolution) {
+    return astrodynamics.sampleTransfer(route.realSolution, 72).map(ephemerisPositionToScene);
+  }
   const points = [];
   route.waypoints.forEach((id, index) => {
     if (index === 0) return;
@@ -2785,9 +3204,35 @@ function normalizeSignedAngle(angle) {
 function getBodyPosition(id, day) {
   const body = bodyById.get(id);
   if (!body || body.id === "sun") return { x: 0, y: 0, z: 0 };
+  if (state.experienceMode === "real") {
+    const ephemerisPosition = getEphemerisBodyPosition(body, day);
+    if (ephemerisPosition) return ephemerisPosition;
+  }
   const parent = getBodyPosition(body.parent, day);
   const angle = getOrbitalAngle(body, day);
   return add(parent, orbitPointAtAngle(body, angle));
+}
+
+function getEphemerisBodyPosition(body, day) {
+  const bodyState = astrodynamics.getState(body.id, day);
+  if (!bodyState) return null;
+  if (body.parent === "sun") return ephemerisPositionToScene(bodyState.positionKm);
+  const parentState = astrodynamics.getState(body.parent, day);
+  if (!parentState) return ephemerisPositionToScene(bodyState.positionKm);
+  const parentPosition = ephemerisPositionToScene(parentState.positionKm);
+  const relative = ephemerisPositionToScene(
+    bodyState.positionKm.map((value, index) => value - parentState.positionKm[index]),
+  );
+  const direction = normalize(relative);
+  return add(parentPosition, scale(direction, body.orbitRadius || 3));
+}
+
+function ephemerisPositionToScene(positionKm) {
+  return {
+    x: (positionKm[0] / AU_KM) * 70,
+    y: (positionKm[2] / AU_KM) * 70,
+    z: (positionKm[1] / AU_KM) * 70,
+  };
 }
 
 function orbitPointAtAngle(body, angle) {
@@ -2935,6 +3380,7 @@ function pickBody(x, y) {
   const placeTab = elements.tabs.find((tab) => tab.dataset.panel === "place");
   placeTab.click();
   syncPanels();
+  ensureAstrodynamicsData();
 }
 
 function strokeProjectedPath(points) {
