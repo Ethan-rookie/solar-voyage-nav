@@ -16,6 +16,8 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.12;
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFShadowMap;
   renderer.setClearColor(0x010203, 1);
   canvas.dataset.renderer = "three-webgl";
 
@@ -75,7 +77,7 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
 
   const routeState = createRouteState(glowTexture);
   routeGroup.add(routeState.tube, routeState.glowLine, routeState.flowGroup, routeState.ship, routeState.gates);
-  const surfaceStage = createSurfaceStage(glowTexture);
+  const surfaceStage = createSurfaceStage(glowTexture, textureLoader, anisotropy);
   scene.add(surfaceStage.group);
 
   const raycaster = new THREE.Raycaster();
@@ -107,6 +109,7 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
     updateSurfaceStage(frame);
     updateOortCloud(frame);
     updateCamera(frame);
+    updateSurfaceBackdrop();
     updateCockpitStreaks(frame, cockpitStreaks, Boolean(resolveSurfacePhase(frame)));
     updateLabels(frame);
     starfield.rotation.y = frame.sceneTime * 0.003;
@@ -151,12 +154,22 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
     orbitGroup.visible = !isolateLandscape;
     routeGroup.visible = !isolateLandscape;
     oortCloud.group.visible = !isolateLandscape;
-    if (!phase) return;
+    if (!phase) {
+      scene.fog.color.setHex(0x010203);
+      scene.fog.density = 0.00035;
+      return;
+    }
 
     const bodyId = phase.mode === "launch" ? frame.state.origin : frame.state.destination;
     const entry = bodyEntries.get(bodyId);
     if (!entry) return;
     configureSurfaceStage(surfaceStage, entry.body, visuals[bodyId] || {});
+    scene.fog.color.setHex(surfaceStage.preset.haze);
+    scene.fog.density = surfaceStage.preset.clouds
+      ? 0.003
+      : surfaceStage.preset.ice
+        ? 0.00105
+        : 0.00072;
     const bodyPosition = resolveBodyPosition(frame, bodyId);
     surfaceStage.group.position.set(
       bodyPosition.x,
@@ -207,6 +220,14 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
       };
     }
     return null;
+  }
+
+  function updateSurfaceBackdrop() {
+    if (!surfaceStage.group.visible || !surfaceStage.backdrop.visible) return;
+    const localCamera = camera.position.clone().sub(surfaceStage.group.position);
+    const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+    surfaceStage.backdrop.position.copy(localCamera).addScaledVector(forward, 118);
+    surfaceStage.backdrop.quaternion.copy(camera.quaternion);
   }
 
   function updateOortCloud(frame) {
@@ -1115,11 +1136,16 @@ const SURFACE_PRESETS = {
   oort: { ground: 0x536a70, rock: 0xa9ced4, haze: 0x102329, accent: 0xc9f6ff, relief: 4.2, ice: true },
 };
 
+const SURFACE_BACKDROPS = {
+  moon: { src: "./assets/surfaces/nasa/moon-surface.jpg", credit: "NASA/JSC · Apollo 15" },
+  mars: { src: "./assets/surfaces/nasa/mars-panorama.jpg", credit: "NASA/JPL-Caltech · Perseverance" },
+};
+
 export function hasSurfaceLandscape(bodyId) {
   return Object.prototype.hasOwnProperty.call(SURFACE_PRESETS, bodyId);
 }
 
-function createSurfaceStage(glowTexture) {
+function createSurfaceStage(glowTexture, textureLoader, anisotropy) {
   const group = new THREE.Group();
   group.visible = false;
   const fadeMaterials = [];
@@ -1131,10 +1157,10 @@ function createSurfaceStage(glowTexture) {
     return material;
   };
 
-  const groundGeometry = new THREE.PlaneGeometry(190, 190, 48, 48);
+  const groundGeometry = new THREE.PlaneGeometry(190, 190, 96, 96);
   groundGeometry.rotateX(-Math.PI / 2);
   const groundMaterial = register(
-    new THREE.MeshStandardMaterial({ color: 0x29433a, roughness: 0.94, metalness: 0, side: THREE.DoubleSide }),
+    new THREE.MeshStandardMaterial({ color: 0x29433a, roughness: 0.88, metalness: 0.02, side: THREE.DoubleSide }),
   );
   const ground = new THREE.Mesh(groundGeometry, groundMaterial);
   ground.receiveShadow = true;
@@ -1149,11 +1175,17 @@ function createSurfaceStage(glowTexture) {
   liquid.position.y = 0.08;
   group.add(liquid);
 
-  const rockMaterial = register(new THREE.MeshStandardMaterial({ color: 0x72846c, roughness: 0.98, flatShading: true }));
-  const rocks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 1), rockMaterial, 58);
+  const rockMaterial = register(new THREE.MeshStandardMaterial({ color: 0x72846c, roughness: 0.92, metalness: 0.01 }));
+  const rockGeometry = new THREE.DodecahedronGeometry(1, 1);
+  const rocks = new THREE.InstancedMesh(rockGeometry, rockMaterial, 76);
+  rocks.castShadow = true;
+  rocks.receiveShadow = true;
   group.add(rocks);
-  const ridgeMaterial = register(new THREE.MeshStandardMaterial({ color: 0x657465, roughness: 1, flatShading: true }));
-  const ridges = new THREE.InstancedMesh(new THREE.ConeGeometry(1, 2.6, 6), ridgeMaterial, 24);
+  const ridgeMaterial = register(new THREE.MeshStandardMaterial({ color: 0x657465, roughness: 0.96, metalness: 0.01 }));
+  const ridgeGeometry = new THREE.DodecahedronGeometry(1, 2);
+  const ridges = new THREE.InstancedMesh(ridgeGeometry, ridgeMaterial, 28);
+  ridges.castShadow = true;
+  ridges.receiveShadow = true;
   group.add(ridges);
 
   const padMaterial = register(
@@ -1194,11 +1226,18 @@ function createSurfaceStage(glowTexture) {
   }
   group.add(platform);
 
+  const cloudTexture = createSurfaceCloudTexture();
   const cloudLayers = [];
   for (let index = 0; index < 3; index += 1) {
     const cloudMaterial = register(
-      new THREE.MeshBasicMaterial({ color: 0xd8e7e8, side: THREE.DoubleSide, depthWrite: false }),
-      0.12 - index * 0.02,
+      new THREE.MeshBasicMaterial({
+        map: cloudTexture,
+        color: 0xd8e7e8,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        alphaTest: 0.012,
+      }),
+      0.16 - index * 0.035,
     );
     const layer = new THREE.Mesh(new THREE.CircleGeometry(108 - index * 12, 64), cloudMaterial);
     layer.rotation.x = -Math.PI / 2;
@@ -1208,13 +1247,22 @@ function createSurfaceStage(glowTexture) {
   }
 
   const hazeMaterial = register(
-    new THREE.MeshBasicMaterial({ color: 0x315f78, side: THREE.BackSide, depthWrite: false }),
-    0.22,
+    new THREE.MeshBasicMaterial({ color: 0xffffff, side: THREE.BackSide, depthWrite: false, fog: false }),
+    0.88,
   );
-  const haze = new THREE.Mesh(new THREE.SphereGeometry(138, 32, 20), hazeMaterial);
+  const haze = new THREE.Mesh(new THREE.SphereGeometry(138, 48, 28), hazeMaterial);
   haze.scale.y = 0.58;
   haze.position.y = 18;
   group.add(haze);
+
+  const backdropMaterial = register(
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, depthWrite: false, fog: false, side: THREE.DoubleSide }),
+    0.96,
+  );
+  const backdrop = new THREE.Mesh(new THREE.PlaneGeometry(220, 108), backdropMaterial);
+  backdrop.visible = false;
+  backdrop.renderOrder = -5;
+  group.add(backdrop);
 
   const dustPositions = new Float32Array(420 * 3);
   for (let index = 0; index < 420; index += 1) {
@@ -1234,8 +1282,26 @@ function createSurfaceStage(glowTexture) {
   group.add(dust);
 
   const craft = createCinematicShip(glowTexture);
+  craft.ship.traverse((object) => {
+    if (!object.isMesh) return;
+    object.castShadow = true;
+    object.receiveShadow = true;
+  });
   group.add(craft.ship);
   fadeMaterials.push(...craft.fadeMaterials);
+
+  const surfaceLight = new THREE.DirectionalLight(0xffe7c4, 3.8);
+  surfaceLight.position.set(36, 52, 28);
+  surfaceLight.castShadow = true;
+  surfaceLight.shadow.mapSize.set(1024, 1024);
+  surfaceLight.shadow.camera.left = -72;
+  surfaceLight.shadow.camera.right = 72;
+  surfaceLight.shadow.camera.top = 72;
+  surfaceLight.shadow.camera.bottom = -72;
+  surfaceLight.shadow.camera.near = 1;
+  surfaceLight.shadow.camera.far = 180;
+  surfaceLight.target.position.set(0, 0, 0);
+  group.add(surfaceLight, surfaceLight.target, new THREE.HemisphereLight(0xaac5d2, 0x1a1010, 1.25));
 
   return {
     group,
@@ -1259,6 +1325,13 @@ function createSurfaceStage(glowTexture) {
     cloudLayers,
     haze,
     hazeMaterial,
+    backdrop,
+    backdropMaterial,
+    backdropCache: new Map(),
+    surfaceMapCache: new Map(),
+    textureLoader,
+    anisotropy,
+    surfaceLight,
     dust,
     dustMaterial,
     ship: craft.ship,
@@ -1403,6 +1476,282 @@ function createSweptWingGeometry(side) {
   return geometry;
 }
 
+function createSurfaceCloudTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 512;
+  const context = canvas.getContext("2d");
+  context.clearRect(0, 0, canvas.width, canvas.height);
+
+  for (let index = 0; index < 92; index += 1) {
+    const x = seededUnit(index * 37 + 11) * canvas.width;
+    const y = seededUnit(index * 53 + 17) * canvas.height;
+    const radiusX = 20 + seededUnit(index * 67 + 23) * 66;
+    const radiusY = radiusX * (0.28 + seededUnit(index * 71 + 29) * 0.34);
+    const alpha = 0.055 + seededUnit(index * 83 + 31) * 0.15;
+    const gradient = context.createRadialGradient(x, y, 0, x, y, radiusX);
+    gradient.addColorStop(0, `rgba(255,255,255,${alpha})`);
+    gradient.addColorStop(0.48, `rgba(255,255,255,${alpha * 0.72})`);
+    gradient.addColorStop(1, "rgba(255,255,255,0)");
+    context.save();
+    context.translate(x, y);
+    context.rotate((seededUnit(index * 89 + 7) - 0.5) * 0.8);
+    context.scale(1, radiusY / radiusX);
+    context.translate(-x, -y);
+    context.fillStyle = gradient;
+    context.fillRect(x - radiusX, y - radiusX, radiusX * 2, radiusX * 2);
+    context.restore();
+  }
+
+  context.globalCompositeOperation = "destination-in";
+  const edge = context.createRadialGradient(256, 256, 138, 256, 256, 256);
+  edge.addColorStop(0, "rgba(255,255,255,1)");
+  edge.addColorStop(0.72, "rgba(255,255,255,0.92)");
+  edge.addColorStop(1, "rgba(255,255,255,0)");
+  context.fillStyle = edge;
+  context.fillRect(0, 0, 512, 512);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.wrapT = THREE.RepeatWrapping;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  return texture;
+}
+
+function createSurfaceSkyTexture(body, preset) {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1024;
+  canvas.height = 512;
+  const context = canvas.getContext("2d");
+  const airless = !preset.clouds && !preset.liquid && !preset.platform && body.id !== "mars";
+  const top = airless
+    ? 0x010204
+    : new THREE.Color(preset.haze).multiplyScalar(preset.clouds ? 0.32 : 0.18).getHex();
+  const middle = airless
+    ? new THREE.Color(preset.haze).multiplyScalar(0.42).getHex()
+    : preset.haze;
+  const horizon = airless
+    ? new THREE.Color(preset.ground).multiplyScalar(0.3).getHex()
+    : new THREE.Color(preset.rock).lerp(new THREE.Color(preset.haze), 0.45).getHex();
+  const gradient = context.createLinearGradient(0, 0, 0, canvas.height);
+  gradient.addColorStop(0, hexCss(top));
+  gradient.addColorStop(0.48, hexCss(middle));
+  gradient.addColorStop(0.82, hexCss(horizon));
+  gradient.addColorStop(1, hexCss(new THREE.Color(horizon).multiplyScalar(0.64).getHex()));
+  context.fillStyle = gradient;
+  context.fillRect(0, 0, canvas.width, canvas.height);
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  texture.wrapS = THREE.RepeatWrapping;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  return texture;
+}
+
+function createRealisticSurfaceMaps(body, preset, anisotropy) {
+  const size = 512;
+  const colorCanvas = document.createElement("canvas");
+  const bumpCanvas = document.createElement("canvas");
+  colorCanvas.width = size;
+  colorCanvas.height = size;
+  bumpCanvas.width = size;
+  bumpCanvas.height = size;
+  const colorContext = colorCanvas.getContext("2d");
+  const bumpContext = bumpCanvas.getContext("2d");
+  const colorImage = colorContext.createImageData(size, size);
+  const bumpImage = bumpContext.createImageData(size, size);
+  const seed = hashString(body.id);
+  const ground = hexChannels(preset.ground);
+  const rock = hexChannels(preset.rock);
+  const shadow = ground.map((channel) => channel * (preset.ice ? 0.58 : 0.42));
+  const airless = !preset.clouds && !preset.liquid && !preset.platform && body.id !== "mars";
+  const craterCount = airless ? 20 : preset.ice ? 8 : body.id === "mars" ? 5 : 0;
+  const craters = [];
+  for (let index = 0; index < craterCount; index += 1) {
+    craters.push({
+      x: seededUnit(seed + index * 41 + 3),
+      y: seededUnit(seed + index * 47 + 7),
+      radius: 0.018 + seededUnit(seed + index * 61 + 11) * (airless ? 0.095 : 0.055),
+    });
+  }
+
+  for (let y = 0; y < size; y += 1) {
+    const v = y / size;
+    for (let x = 0; x < size; x += 1) {
+      const u = x / size;
+      const broad = fractalNoise2D(u * 7.5, v * 7.5, seed, 5);
+      const fine = fractalNoise2D(u * 31, v * 31, seed + 991, 3);
+      let height = broad * 0.68 + fine * 0.22;
+
+      if (body.id === "mars") {
+        height += Math.sin((v * 31 + broad * 1.7) * Math.PI) * 0.08;
+      } else if (preset.platform) {
+        height = height * 0.28 + Math.sin((v * 18 + broad) * Math.PI) * 0.17;
+      }
+
+      for (const crater of craters) {
+        const dxRaw = Math.abs(u - crater.x);
+        const dyRaw = Math.abs(v - crater.y);
+        const dx = Math.min(dxRaw, 1 - dxRaw);
+        const dy = Math.min(dyRaw, 1 - dyRaw);
+        const distance = Math.hypot(dx, dy) / crater.radius;
+        if (distance > 1.35) continue;
+        const bowl = distance < 1 ? -Math.pow(1 - distance, 1.75) * 0.58 : 0;
+        const rim = Math.exp(-Math.pow((distance - 1) / 0.13, 2)) * 0.34;
+        height += bowl + rim;
+      }
+
+      let hot = 0;
+      if (preset.lava) {
+        const fissure = Math.abs(Math.sin((u * 9.5 + broad * 1.8) * Math.PI) + Math.cos((v * 12 - fine) * Math.PI) * 0.34);
+        hot = THREE.MathUtils.clamp((0.13 - fissure) * 7.5, 0, 1);
+        height -= hot * 0.22;
+      }
+
+      const normalized = THREE.MathUtils.clamp(height * 0.7 + 0.5, 0, 1);
+      const lowMix = THREE.MathUtils.clamp(normalized * 2, 0, 1);
+      const highMix = THREE.MathUtils.clamp((normalized - 0.48) * 1.9, 0, 1);
+      const lowColor = mixChannels(shadow, ground, lowMix);
+      let pixelColor = mixChannels(lowColor, rock, highMix);
+      if (preset.ice) {
+        const frost = THREE.MathUtils.clamp((fine + 0.45) * 0.36, 0, 0.42);
+        pixelColor = mixChannels(pixelColor, [220, 237, 240], frost);
+      }
+      if (hot > 0) pixelColor = mixChannels(pixelColor, [255, 126, 28], hot * 0.92);
+
+      const offset = (y * size + x) * 4;
+      colorImage.data[offset] = pixelColor[0];
+      colorImage.data[offset + 1] = pixelColor[1];
+      colorImage.data[offset + 2] = pixelColor[2];
+      colorImage.data[offset + 3] = 255;
+      const bump = Math.round(THREE.MathUtils.clamp(0.5 + height * 0.42, 0, 1) * 255);
+      bumpImage.data[offset] = bump;
+      bumpImage.data[offset + 1] = bump;
+      bumpImage.data[offset + 2] = bump;
+      bumpImage.data[offset + 3] = 255;
+    }
+  }
+  colorContext.putImageData(colorImage, 0, 0);
+  bumpContext.putImageData(bumpImage, 0, 0);
+
+  if (preset.ice) drawSurfaceCracks(colorContext, bumpContext, body, preset, size);
+
+  const colorTexture = new THREE.CanvasTexture(colorCanvas);
+  colorTexture.colorSpace = THREE.SRGBColorSpace;
+  colorTexture.wrapS = THREE.RepeatWrapping;
+  colorTexture.wrapT = THREE.RepeatWrapping;
+  colorTexture.repeat.set(4.5, 4.5);
+  colorTexture.anisotropy = anisotropy;
+  colorTexture.minFilter = THREE.LinearMipmapLinearFilter;
+  colorTexture.magFilter = THREE.LinearFilter;
+
+  const bumpTexture = new THREE.CanvasTexture(bumpCanvas);
+  bumpTexture.wrapS = THREE.RepeatWrapping;
+  bumpTexture.wrapT = THREE.RepeatWrapping;
+  bumpTexture.repeat.set(4.5, 4.5);
+  bumpTexture.anisotropy = anisotropy;
+  bumpTexture.minFilter = THREE.LinearMipmapLinearFilter;
+  bumpTexture.magFilter = THREE.LinearFilter;
+  return { color: colorTexture, bump: bumpTexture };
+}
+
+function drawSurfaceCracks(colorContext, bumpContext, body, preset, size) {
+  const seed = hashString(`${body.id}-cracks`);
+  const crackCount = 14 + Math.round(preset.relief * 2);
+  colorContext.lineCap = "round";
+  bumpContext.lineCap = "round";
+  for (let index = 0; index < crackCount; index += 1) {
+    const horizontal = index % 3 !== 0;
+    const startX = horizontal ? -24 : seededUnit(seed + index * 31) * size;
+    const startY = horizontal ? seededUnit(seed + index * 37) * size : -24;
+    colorContext.beginPath();
+    bumpContext.beginPath();
+    colorContext.moveTo(startX, startY);
+    bumpContext.moveTo(startX, startY);
+    for (let step = 1; step <= 12; step += 1) {
+      const distance = (step / 12) * (size + 48) - 24;
+      const bend = (seededUnit(seed + index * 97 + step * 17) - 0.5) * 22;
+      const x = horizontal ? distance : startX + bend;
+      const y = horizontal ? startY + bend : distance;
+      colorContext.lineTo(x, y);
+      bumpContext.lineTo(x, y);
+    }
+    colorContext.strokeStyle = colorWithAlpha(preset.accent, 0.42);
+    colorContext.lineWidth = 1.2 + (index % 3) * 0.55;
+    colorContext.stroke();
+    bumpContext.strokeStyle = "rgb(40,40,40)";
+    bumpContext.lineWidth = 2.2 + (index % 2);
+    bumpContext.stroke();
+  }
+}
+
+function sampleSurfaceHeight(body, preset, x, z, seed) {
+  const distance = Math.hypot(x, z);
+  const flatten = THREE.MathUtils.smoothstep(distance, 8, 18);
+  const broad = fractalNoise2D(x * 0.035, z * 0.035, seed, 5);
+  const detail = fractalNoise2D(x * 0.12, z * 0.12, seed + 947, 3);
+  let height = (broad * 0.82 + detail * 0.19) * preset.relief;
+  if (body.id === "mars") height += Math.sin(x * 0.08 + z * 0.025) * 0.34;
+  if (preset.platform) height *= 0.18;
+  if (preset.liquid) height *= 0.72;
+
+  const cratered = !preset.clouds && !preset.liquid && !preset.platform;
+  const craterCount = cratered ? 9 : preset.ice ? 4 : 0;
+  for (let index = 0; index < craterCount; index += 1) {
+    const craterX = (seededUnit(seed + index * 43 + 5) - 0.5) * 154;
+    const craterZ = (seededUnit(seed + index * 47 + 9) - 0.5) * 154;
+    const radius = 5 + seededUnit(seed + index * 59 + 13) * 14;
+    const craterDistance = Math.hypot(x - craterX, z - craterZ) / radius;
+    if (craterDistance > 1.36) continue;
+    const bowl = craterDistance < 1 ? -Math.pow(1 - craterDistance, 1.7) * preset.relief * 0.72 : 0;
+    const rim = Math.exp(-Math.pow((craterDistance - 1) / 0.14, 2)) * preset.relief * 0.28;
+    height += bowl + rim;
+  }
+  return height * flatten;
+}
+
+function valueNoise2D(x, y, seed) {
+  const x0 = Math.floor(x);
+  const y0 = Math.floor(y);
+  const tx = x - x0;
+  const ty = y - y0;
+  const sx = tx * tx * (3 - 2 * tx);
+  const sy = ty * ty * (3 - 2 * ty);
+  const sample = (ix, iy) => seededUnit(seed + ix * 15731 + iy * 789221);
+  const top = THREE.MathUtils.lerp(sample(x0, y0), sample(x0 + 1, y0), sx);
+  const bottom = THREE.MathUtils.lerp(sample(x0, y0 + 1), sample(x0 + 1, y0 + 1), sx);
+  return THREE.MathUtils.lerp(top, bottom, sy) * 2 - 1;
+}
+
+function fractalNoise2D(x, y, seed, octaves) {
+  let frequency = 1;
+  let amplitude = 1;
+  let total = 0;
+  let weight = 0;
+  for (let octave = 0; octave < octaves; octave += 1) {
+    total += valueNoise2D(x * frequency, y * frequency, seed + octave * 1013) * amplitude;
+    weight += amplitude;
+    frequency *= 2.03;
+    amplitude *= 0.5;
+  }
+  return total / weight;
+}
+
+function hexChannels(hex) {
+  return [(hex >> 16) & 255, (hex >> 8) & 255, hex & 255];
+}
+
+function mixChannels(from, to, amount) {
+  return from.map((channel, index) => Math.round(THREE.MathUtils.lerp(channel, to[index], amount)));
+}
+
+function hexCss(hex) {
+  return `#${hex.toString(16).padStart(6, "0")}`;
+}
+
 function configureSurfaceStage(stage, body, visual) {
   if (stage.bodyId === body.id) return;
   stage.bodyId = body.id;
@@ -1418,41 +1767,110 @@ function configureSurfaceStage(stage, body, visual) {
   };
   const preset = { ...fallback, ...(SURFACE_PRESETS[body.id] || {}) };
   stage.preset = preset;
-  stage.groundMaterial.color.setHex(preset.ground);
+  let surfaceMaps = stage.surfaceMapCache.get(`surface:${body.id}`);
+  if (!surfaceMaps) {
+    surfaceMaps = createRealisticSurfaceMaps(body, preset, stage.anisotropy);
+    stage.surfaceMapCache.set(`surface:${body.id}`, surfaceMaps);
+  }
+  let skyTexture = stage.surfaceMapCache.get(`sky:${body.id}`);
+  if (!skyTexture) {
+    skyTexture = createSurfaceSkyTexture(body, preset);
+    stage.surfaceMapCache.set(`sky:${body.id}`, skyTexture);
+  }
+  stage.groundMaterial.color.setHex(0xffffff);
+  stage.groundMaterial.map = surfaceMaps.color;
+  stage.groundMaterial.bumpMap = surfaceMaps.bump;
+  stage.groundMaterial.bumpScale = 0.8 + preset.relief * 0.34;
+  stage.groundMaterial.roughness = preset.ice ? 0.68 : preset.platform ? 0.58 : 0.92;
+  stage.groundMaterial.metalness = preset.ice ? 0.035 : 0.01;
   stage.groundMaterial.emissive.setHex(preset.lava ? 0x351006 : preset.ice ? 0x10262b : 0x090c0d);
   stage.groundMaterial.emissiveIntensity = preset.lava ? 0.75 : preset.ice ? 0.35 : 0.18;
-  stage.rockMaterial.color.setHex(preset.rock);
-  stage.ridgeMaterial.color.setHex(new THREE.Color(preset.rock).multiplyScalar(0.72).getHex());
-  stage.hazeMaterial.color.setHex(preset.haze);
+  stage.groundMaterial.needsUpdate = true;
+  stage.rockMaterial.color.setHex(0xffffff);
+  stage.rockMaterial.map = surfaceMaps.color;
+  stage.rockMaterial.bumpMap = surfaceMaps.bump;
+  stage.rockMaterial.bumpScale = 0.24 + preset.relief * 0.08;
+  stage.rockMaterial.needsUpdate = true;
+  stage.ridgeMaterial.color.setHex(0xc7c7c7);
+  stage.ridgeMaterial.map = surfaceMaps.color;
+  stage.ridgeMaterial.bumpMap = surfaceMaps.bump;
+  stage.ridgeMaterial.bumpScale = 0.34 + preset.relief * 0.1;
+  stage.ridgeMaterial.needsUpdate = true;
+  stage.hazeMaterial.color.setHex(0xffffff);
+  stage.hazeMaterial.map = skyTexture;
+  stage.hazeMaterial.userData.surfaceBaseOpacity = preset.clouds ? 0.96 : preset.ice ? 0.72 : 0.82;
+  stage.hazeMaterial.opacity = stage.hazeMaterial.userData.surfaceBaseOpacity * stage.opacity;
+  stage.hazeMaterial.needsUpdate = true;
   stage.dustMaterial.color.setHex(preset.accent);
+  stage.dustMaterial.userData.surfaceBaseOpacity = preset.clouds ? 0.2 : body.id === "mars" ? 0.48 : 0.28;
+  stage.dustMaterial.opacity = stage.dustMaterial.userData.surfaceBaseOpacity * stage.opacity;
   stage.padRingMaterial.color.setHex(preset.accent);
   stage.beaconRingMaterial.color.setHex(preset.lava ? 0xff7b32 : 0xf1b75c);
   stage.liquidMaterial.color.setHex(body.id === "titan" ? 0x3b2b17 : 0x164a63);
+  stage.liquidMaterial.roughness = body.id === "titan" ? 0.46 : 0.18;
+  stage.liquidMaterial.bumpMap = surfaceMaps.bump;
+  stage.liquidMaterial.bumpScale = body.id === "titan" ? 0.1 : 0.045;
+  stage.liquidMaterial.needsUpdate = true;
   stage.liquid.visible = Boolean(preset.liquid);
   stage.platform.visible = Boolean(preset.platform);
+  stage.rocks.count = preset.liquid ? 26 : preset.clouds ? 48 : 76;
+  stage.ridges.count = preset.liquid ? 10 : preset.clouds ? 18 : 28;
   stage.rocks.visible = !preset.platform;
   stage.ridges.visible = !preset.platform;
   stage.cloudLayers.forEach((layer, index) => {
     layer.visible = Boolean(preset.clouds);
     layer.material.color.setHex(index === 0 ? preset.rock : preset.accent);
+    layer.material.userData.surfaceBaseOpacity = preset.clouds ? 0.18 - index * 0.038 : 0;
+    layer.material.opacity = layer.material.userData.surfaceBaseOpacity * stage.opacity;
   });
+  stage.surfaceLight.color.setHex(preset.ice ? 0xd7f2ff : ["mars", "venus", "titan"].includes(body.id) ? 0xffd0a3 : 0xffedd5);
+  stage.surfaceLight.intensity = preset.clouds ? 3.15 : 4.25;
   stage.shipAccentMaterials[0].color.setHex(preset.accent);
   stage.shipAccentMaterials[0].emissive.setHex(preset.accent);
   stage.shipAccentMaterials[1].emissive.setHex(preset.accent);
+
+  const backdropSpec = SURFACE_BACKDROPS[body.id];
+  stage.backdrop.visible = Boolean(backdropSpec);
+  stage.backdrop.userData.credit = backdropSpec?.credit || "";
+  stage.backdrop.scale.set(body.id === "moon" ? 0.72 : 1, body.id === "mars" ? 0.74 : 1, 1);
+  stage.backdropMaterial.userData.surfaceBaseOpacity = body.id === "moon" ? 0.74 : 0.9;
+  stage.backdropMaterial.opacity = stage.backdropMaterial.userData.surfaceBaseOpacity * stage.opacity;
+  if (backdropSpec) {
+    const cachedBackdrop = stage.backdropCache.get(body.id);
+    if (cachedBackdrop) {
+      stage.backdropMaterial.map = cachedBackdrop;
+      stage.backdropMaterial.needsUpdate = true;
+    } else {
+      stage.backdropMaterial.map = null;
+      stage.textureLoader.load(
+        backdropSpec.src,
+        (texture) => {
+          texture.colorSpace = THREE.SRGBColorSpace;
+          texture.anisotropy = stage.anisotropy;
+          texture.minFilter = THREE.LinearMipmapLinearFilter;
+          texture.magFilter = THREE.LinearFilter;
+          stage.backdropCache.set(body.id, texture);
+          if (stage.bodyId !== body.id) return;
+          stage.backdropMaterial.map = texture;
+          stage.backdropMaterial.needsUpdate = true;
+        },
+        undefined,
+        () => {
+          if (stage.bodyId === body.id) stage.backdrop.visible = false;
+        },
+      );
+    }
+  } else {
+    stage.backdropMaterial.map = null;
+    stage.backdropMaterial.needsUpdate = true;
+  }
 
   const seed = hashString(body.id);
   const positions = stage.groundGeometry.attributes.position;
   for (let index = 0; index < positions.count; index += 1) {
     const x = positions.getX(index);
     const z = positions.getZ(index);
-    const distance = Math.hypot(x, z);
-    const flatten = THREE.MathUtils.smoothstep(distance, 8, 18);
-    const waves =
-      Math.sin(x * 0.11 + seed * 0.001) * 0.48 +
-      Math.cos(z * 0.085 - seed * 0.002) * 0.38 +
-      Math.sin((x + z) * 0.037 + seed) * 0.7;
-    const crater = -Math.max(0, Math.sin(distance * 0.17 + seed * 0.01)) * 0.34;
-    positions.setY(index, (waves + crater) * preset.relief * flatten);
+    positions.setY(index, sampleSurfaceHeight(body, preset, x, z, seed));
   }
   positions.needsUpdate = true;
   stage.groundGeometry.computeVertexNormals();
@@ -1464,21 +1882,25 @@ function configureSurfaceStage(stage, body, visual) {
   for (let index = 0; index < stage.rocks.count; index += 1) {
     const angle = seededUnit(seed + index * 17) * TAU;
     const radius = 16 + seededUnit(seed + index * 23) * 72;
-    const size = 0.45 + seededUnit(seed + index * 29) * (preset.relief * 0.8 + 1.2);
-    position.set(Math.cos(angle) * radius, size * 0.42 - 0.2, Math.sin(angle) * radius);
+    const size = 0.24 + seededUnit(seed + index * 29) * (preset.relief * 0.28 + 1.05);
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    position.set(x, sampleSurfaceHeight(body, preset, x, z, seed) + size * 0.3, z);
     quaternion.setFromEuler(new THREE.Euler(index * 0.19, angle, index * 0.11));
-    scale.set(size, size * (0.65 + seededUnit(seed + index * 31)), size * 1.15);
+    scale.set(size * 1.12, size * (0.52 + seededUnit(seed + index * 31) * 0.56), size);
     matrix.compose(position, quaternion, scale);
     stage.rocks.setMatrixAt(index, matrix);
   }
   stage.rocks.instanceMatrix.needsUpdate = true;
   for (let index = 0; index < stage.ridges.count; index += 1) {
     const angle = seededUnit(seed + index * 37) * TAU;
-    const radius = 28 + seededUnit(seed + index * 41) * 58;
-    const size = 2.5 + seededUnit(seed + index * 43) * (3 + preset.relief);
-    position.set(Math.cos(angle) * radius, size * 0.72 - 0.4, Math.sin(angle) * radius);
+    const radius = 46 + seededUnit(seed + index * 41) * 38;
+    const size = 1.45 + seededUnit(seed + index * 43) * (1.9 + preset.relief * 0.34);
+    const x = Math.cos(angle) * radius;
+    const z = Math.sin(angle) * radius;
+    position.set(x, sampleSurfaceHeight(body, preset, x, z, seed) + size * 0.22, z);
     quaternion.setFromEuler(new THREE.Euler(0, angle, (seededUnit(seed + index * 47) - 0.5) * 0.24));
-    scale.set(size * 1.4, size, size * 0.9);
+    scale.set(size * 1.55, size * 0.5, size * 0.92);
     matrix.compose(position, quaternion, scale);
     stage.ridges.setMatrixAt(index, matrix);
   }

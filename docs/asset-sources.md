@@ -10,6 +10,13 @@
 - Jupiter：`assets/textures/nasa/jupiter.jpg`
 - Saturn：`assets/textures/nasa/saturn.jpg`
 
+地表起降阶段另外使用：
+
+- Moon：Apollo 15 月面照片 `assets/surfaces/nasa/moon-surface.jpg`
+- Mars：Perseverance Navcam 360 全景 `assets/surfaces/nasa/mars-panorama.jpg`
+
+其余可着陆天体使用按天体类型生成的高频地表材质、凹凸贴图、环形山、冰裂纹或火山裂隙。这里的目标是保持视觉可信和风貌差异，不将程序化场景标记为真实照片。
+
 没有真实贴图或贴图加载失败时，会继续使用程序化材质：
 
 - 地球：海洋、陆地、云带

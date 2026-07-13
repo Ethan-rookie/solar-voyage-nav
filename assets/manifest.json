@@ -20,5 +20,15 @@
       "local": "./textures/nasa/saturn.jpg",
       "source": "NASA 3D Resources / Images and Textures/Saturn/Saturn.jpg"
     }
+  },
+  "surfaceImagery": {
+    "moon": {
+      "local": "./surfaces/nasa/moon-surface.jpg",
+      "source": "NASA/JSC / Apollo 15 surface photograph"
+    },
+    "mars": {
+      "local": "./surfaces/nasa/mars-panorama.jpg",
+      "source": "NASA/JPL-Caltech / Perseverance Navcams 360-degree panorama"
+    }
   }
 }
