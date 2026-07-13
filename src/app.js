@@ -1,5 +1,5 @@
-import { createSolarScene } from "./webgl-scene.js";
-import { AU_KM, createAstrodynamicsEngine } from "./astrodynamics.js";
+import { createSolarScene } from "./webgl-scene.js?v=20260713-2";
+import { AU_KM, createAstrodynamicsEngine } from "./astrodynamics.js?v=20260713-2";
 
 const TAU = Math.PI * 2;
 const BASE_DATE = new Date(Date.UTC(2042, 0, 1));
