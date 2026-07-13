@@ -2751,6 +2751,44 @@ input[type="range"] {
   border-left-color: var(--gold);
 }
 
+.app-shell[data-flight-phase="surface-launch"] .cockpit-edge,
+.app-shell[data-flight-phase="surface-launch"] .cockpit-lock {
+  color: rgba(145, 216, 229, 0.72);
+  border-color: rgba(145, 216, 229, 0.5);
+}
+
+.app-shell[data-flight-phase="surface-launch"] .cockpit-reticle {
+  border-color: rgba(145, 216, 229, 0.54);
+  transform: translate(-50%, -50%) scale(1.08);
+}
+
+.app-shell[data-flight-phase="surface-landing"] .cockpit-edge,
+.app-shell[data-flight-phase="surface-landing"] .cockpit-lock,
+.app-shell[data-flight-phase="landed"] .cockpit-edge,
+.app-shell[data-flight-phase="landed"] .cockpit-lock {
+  color: rgba(241, 183, 92, 0.76);
+  border-color: rgba(241, 183, 92, 0.52);
+}
+
+.app-shell[data-flight-phase="surface-landing"] .cockpit-reticle,
+.app-shell[data-flight-phase="landed"] .cockpit-reticle {
+  border-color: rgba(241, 183, 92, 0.82);
+  box-shadow: 0 0 30px rgba(241, 183, 92, 0.16), inset 0 0 16px rgba(241, 183, 92, 0.08);
+  transform: translate(-50%, -50%) scale(0.88);
+}
+
+.app-shell[data-flight-phase="surface-landing"] .cockpit-hud,
+.app-shell[data-flight-phase="landed"] .cockpit-hud {
+  border-left-color: var(--gold);
+}
+
+.cockpit-console button:disabled,
+.cockpit-console input:disabled {
+  cursor: default;
+  filter: saturate(0.45);
+  opacity: 0.62;
+}
+
 @keyframes cockpit-frame-enter {
   from { opacity: 0; filter: brightness(1.65); }
   to { opacity: 1; filter: brightness(1); }

@@ -1,8 +1,10 @@
-import { createSolarScene } from "./webgl-scene.js?v=20260713-3";
-import { AU_KM, createAstrodynamicsEngine } from "./astrodynamics.js?v=20260713-3";
+import { createSolarScene } from "./webgl-scene.js?v=20260713-4";
+import { AU_KM, createAstrodynamicsEngine } from "./astrodynamics.js?v=20260713-4";
 
 const TAU = Math.PI * 2;
-const DEPARTURE_HOLD_SECONDS = 2.6;
+const LAUNCH_SEQUENCE_SECONDS = 5.4;
+const LANDING_SEQUENCE_SECONDS = 6.2;
+const LANDING_SEQUENCE_START = 0.82;
 const BASE_DATE = new Date(Date.UTC(2042, 0, 1));
 
 const BODIES = [
@@ -835,7 +837,11 @@ const state = {
   missionActive: false,
   routeProgress: 0,
   launchSequenceElapsed: 0,
+  launchSequenceProgress: 0,
   launchSequenceComplete: false,
+  landingSequenceElapsed: 0,
+  landingSequenceProgress: 0,
+  landingSequenceActive: false,
   missionFuelCommitted: false,
   missionDepartureDay: null,
   missionRoute: null,
@@ -930,6 +936,7 @@ const elements = {
   cockpitTitle: document.getElementById("cockpitTitle"),
   cockpitPhase: document.getElementById("cockpitPhase"),
   cockpitRemaining: document.getElementById("cockpitRemaining"),
+  cockpitRemainingLabel: document.getElementById("cockpitRemainingLabel"),
   cockpitDuration: document.getElementById("cockpitDuration"),
   cockpitDistance: document.getElementById("cockpitDistance"),
   cockpitProgress: document.getElementById("cockpitProgress"),
@@ -1430,7 +1437,11 @@ function resetMissionNavigation() {
   state.missionActive = false;
   state.routeProgress = 0;
   state.launchSequenceElapsed = 0;
+  state.launchSequenceProgress = 0;
   state.launchSequenceComplete = false;
+  state.landingSequenceElapsed = 0;
+  state.landingSequenceProgress = 0;
+  state.landingSequenceActive = false;
   state.missionFuelCommitted = false;
   state.missionDepartureDay = null;
   state.missionRoute = null;
@@ -1476,23 +1487,53 @@ function startMission() {
   applyViewMode("cockpit");
   const activeFlightLabel =
     state.travelMode === "warp" && state.experienceMode === "fantasy" ? "跃迁中" : "巡航中";
-  elements.launchButton.textContent = state.launchSequenceComplete ? activeFlightLabel : "离港中";
+  elements.launchButton.textContent = !state.launchSequenceComplete
+    ? "垂直起飞"
+    : state.landingSequenceActive
+      ? "自动降落"
+      : activeFlightLabel;
   syncPanels();
 }
 
 function updateCockpitConsole(route) {
   const progress = clamp(state.routeProgress, 0, 1);
+  const launching = Boolean(state.missionRoute) && !state.launchSequenceComplete;
+  const landing = Boolean(state.missionRoute) && state.landingSequenceActive && progress < 1;
+  const landed = Boolean(state.missionRoute) && progress >= 1;
   const reactor = clamp(Math.round(96 - progress * 42 - (state.travelMode === "warp" ? 12 : 0)), 24, 99);
   const angle = Math.sin(sceneTime * 0.32) * (state.missionActive ? 1.4 : 0.35);
   elements.throttle.value = state.throttle;
   elements.throttleValue.textContent = `${state.throttle}%`;
   elements.attitudeValue.textContent = `${angle >= 0 ? "+" : ""}${angle.toFixed(1)}°`;
-  elements.engineMode.textContent = state.experienceMode === "real" ? "Lambert 惯性航行" : state.travelMode === "warp" ? "曲率场推进" : "聚变巡航";
+  elements.engineMode.textContent = launching
+    ? "地表垂直起飞"
+    : landing
+      ? "自动下降制导"
+      : landed
+        ? "地表待机"
+      : state.experienceMode === "real"
+        ? "Lambert 惯性航行"
+        : state.travelMode === "warp"
+          ? "曲率场推进"
+          : "聚变巡航";
   elements.reactorValue.textContent = `${reactor}%`;
   const plan = route.energyPlan || { energyId: "helios" };
   elements.cockpitFuel.textContent = state.experienceMode === "real" ? `${route.realSolution?.totalDeltaV.toFixed(1) || "—"} km/s` : `${(state.inventory[plan.energyId] || 0).toFixed(2)} u`;
   elements.warpControl.classList.toggle("is-ready", state.experienceMode === "fantasy" && state.travelMode === "warp" && route.energyPlan.canAfford);
-  elements.warpControl.textContent = state.travelMode === "warp" ? (state.missionActive ? "跃迁锁定" : "启动跃迁") : "充能跃迁";
+  elements.warpControl.textContent = launching
+    ? "上升通道锁定"
+    : landing
+      ? "着陆点锁定"
+      : landed
+        ? "地表作业就绪"
+      : state.travelMode === "warp"
+        ? state.missionActive
+          ? "跃迁锁定"
+          : "启动跃迁"
+        : "充能跃迁";
+  const surfaceAutomation = launching || landing;
+  elements.throttle.disabled = surfaceAutomation;
+  elements.warpControl.disabled = surfaceAutomation;
 }
 
 function renderTiming(route, vehicle) {
@@ -1589,11 +1630,17 @@ function tick(now) {
   if (state.missionActive) {
     if (!state.launchSequenceComplete) {
       state.launchSequenceElapsed += dt;
-      if (state.launchSequenceElapsed >= DEPARTURE_HOLD_SECONDS) {
+      state.launchSequenceProgress = clamp(state.launchSequenceElapsed / LAUNCH_SEQUENCE_SECONDS, 0, 1);
+      if (state.launchSequenceProgress >= 1) {
         state.launchSequenceComplete = true;
         elements.launchButton.textContent =
           state.travelMode === "warp" && state.experienceMode === "fantasy" ? "跃迁中" : "巡航中";
       }
+    } else if (state.landingSequenceActive) {
+      state.landingSequenceElapsed += dt;
+      state.landingSequenceProgress = clamp(state.landingSequenceElapsed / LANDING_SEQUENCE_SECONDS, 0, 1);
+      const landingEase = smoothstep(state.landingSequenceProgress);
+      state.routeProgress = mix(LANDING_SEQUENCE_START, 1, landingEase);
     } else {
       const throttleFactor = state.throttle / 62;
       const playbackSeconds =
@@ -1602,11 +1649,22 @@ function tick(now) {
           : state.travelMode === "warp"
             ? 3.2
             : clamp(route.durationDays / 5, 6, 14);
-      state.routeProgress += (dt * throttleFactor) / playbackSeconds;
+      state.routeProgress = Math.min(
+        LANDING_SEQUENCE_START,
+        state.routeProgress + (dt * throttleFactor) / playbackSeconds,
+      );
+      if (state.routeProgress >= LANDING_SEQUENCE_START) {
+        state.landingSequenceActive = true;
+        state.landingSequenceElapsed = 0;
+        state.landingSequenceProgress = 0;
+        elements.launchButton.textContent = "自动降落";
+      }
     }
     if (state.routeProgress >= 1) {
       state.routeProgress = 1;
       state.missionActive = false;
+      state.landingSequenceActive = false;
+      state.landingSequenceProgress = 1;
       state.missionFuelCommitted = false;
       state.day = Math.min(2400, state.missionDepartureDay + route.durationDays);
       elements.timeSlider.value = Math.round(state.day);
@@ -1615,7 +1673,7 @@ function tick(now) {
       elements.launchButton.textContent = "再次启航";
       elements.dataStatus.textContent =
         state.experienceMode === "real"
-          ? `导航完成 · 已锁定 ${bodyById.get(state.destination).name} 伴飞轨道`
+          ? `导航完成 · 已抵达 ${bodyById.get(state.destination).port}`
           : `已抵达 ${bodyById.get(state.destination).name} · 可开始采集`;
       renderEnergyInventory();
     }
@@ -1647,32 +1705,48 @@ function updateCockpitHud(route) {
   const progress = clamp(state.routeProgress, 0, 1);
   const phase =
     progress >= 1
-      ? "arrived"
-      : progress >= 0.9
-        ? "capture"
-        : progress >= 0.68
-          ? "approach"
-          : progress >= 0.08
-            ? "cruise"
-            : "departure";
+      ? "landed"
+      : state.landingSequenceActive
+        ? "surface-landing"
+        : !state.launchSequenceComplete && state.missionRoute
+          ? "surface-launch"
+          : progress >= 0.68
+            ? "approach"
+            : progress >= 0.08
+              ? "cruise"
+              : "departure";
   const phaseLabels = {
+    "surface-launch": "SURFACE ASCENT / 地表起飞",
     departure: "DEPARTURE / 姿态建立",
     cruise: "CRUISE / 深空巡航",
     approach: "APPROACH / 进近制导",
-    capture: "ORBIT CAPTURE / 轨道捕获",
-    arrived: "ARRIVAL / 伴飞锁定",
+    "surface-landing": "DESCENT / 自动着陆",
+    landed: "TOUCHDOWN / 地表抵达",
   };
   const phaseTitles = {
+    "surface-launch": `起飞 · ${origin.port}`,
     departure: `离港 · ${origin.port}`,
     cruise: `巡航 · 前往${destination.name}`,
     approach: `进近 · ${destination.name}`,
-    capture: `捕获 · ${destination.name}轨道`,
-    arrived: `已抵达 · ${destination.name}`,
+    "surface-landing": `下降 · ${destination.port}`,
+    landed: `已着陆 · ${destination.name}`,
   };
   elements.appShell.dataset.flightPhase = phase;
   elements.cockpitPhase.textContent = phaseLabels[phase];
   elements.cockpitTitle.textContent = phaseTitles[phase];
-  elements.cockpitRemaining.textContent = progress >= 1 ? "已到达" : formatDuration(route.durationDays * (1 - progress));
+  if (phase === "surface-launch") {
+    elements.cockpitRemainingLabel.textContent = "高度";
+    elements.cockpitRemaining.textContent = `${Math.round(1 + smoothstep(state.launchSequenceProgress) * 99)} km`;
+  } else if (phase === "surface-landing") {
+    elements.cockpitRemainingLabel.textContent = "离地";
+    elements.cockpitRemaining.textContent = `${Math.max(0.2, (1 - smoothstep(state.landingSequenceProgress)) * 62).toFixed(1)} km`;
+  } else if (phase === "landed") {
+    elements.cockpitRemainingLabel.textContent = "状态";
+    elements.cockpitRemaining.textContent = "已着陆";
+  } else {
+    elements.cockpitRemainingLabel.textContent = "剩余";
+    elements.cockpitRemaining.textContent = formatDuration(route.durationDays * (1 - progress));
+  }
   elements.cockpitDuration.textContent = formatDuration(route.durationDays);
   elements.cockpitDistance.textContent = `${route.distanceAu.toFixed(2)} au`;
   elements.cockpitProgress.style.width = `${Math.max(4, progress * 100)}%`;
@@ -3577,6 +3651,11 @@ function clamp(value, min, max) {
 
 function mix(from, to, amount) {
   return from + (to - from) * amount;
+}
+
+function smoothstep(value) {
+  const amount = clamp(value, 0, 1);
+  return amount * amount * (3 - 2 * amount);
 }
 
 function wrap(value) {

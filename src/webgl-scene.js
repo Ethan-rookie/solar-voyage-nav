@@ -73,8 +73,8 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
 
   const routeState = createRouteState(glowTexture);
   routeGroup.add(routeState.tube, routeState.glowLine, routeState.flowGroup, routeState.ship, routeState.gates);
-  const departureScenery = createDepartureScenery(glowTexture);
-  scene.add(departureScenery.group);
+  const surfaceStage = createSurfaceStage(glowTexture);
+  scene.add(surfaceStage.group);
 
   const raycaster = new THREE.Raycaster();
   const pointer = new THREE.Vector2();
@@ -102,7 +102,7 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
     updateBodies(frame);
     updateOrbits(frame);
     updateRoute(frame);
-    updateDepartureScenery(frame);
+    updateSurfaceStage(frame);
     updateOortCloud(frame);
     updateCamera(frame);
     updateCockpitStreaks(frame, cockpitStreaks);
@@ -112,22 +112,63 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
     renderer.render(scene, camera);
   }
 
-  function updateDepartureScenery(frame) {
-    const active = frame.state.viewMode === "cockpit" && routeCurve;
-    if (!active) {
-      departureScenery.group.visible = false;
-      return;
+  function updateSurfaceStage(frame) {
+    const phase = resolveSurfacePhase(frame);
+    surfaceStage.group.visible = Boolean(phase);
+    if (!phase) return;
+
+    const bodyId = phase.mode === "launch" ? frame.state.origin : frame.state.destination;
+    const entry = bodyEntries.get(bodyId);
+    if (!entry) return;
+    configureSurfaceStage(surfaceStage, entry.body, visuals[bodyId] || {});
+    const bodyPosition = getBodyPosition(bodyId, frame.ephemerisDay ?? frame.state.day);
+    surfaceStage.group.position.set(
+      bodyPosition.x,
+      bodyPosition.y + entry.displayRadius + (surfaceStage.preset.platform ? 1.8 : 0.12),
+      bodyPosition.z,
+    );
+
+    const eased = smootherstep(phase.progress);
+    if (phase.mode === "launch") {
+      surfaceStage.ship.position.set(eased * 7, 1.6 + eased * 48, -eased * 9);
+      surfaceStage.ship.rotation.z = -eased * 0.08;
+      surfaceStage.ship.rotation.x = eased * 0.04;
+      surfaceStage.landingGear.visible = phase.progress < 0.24;
+      setSurfaceOpacity(surfaceStage, 1 - THREE.MathUtils.smoothstep(phase.progress, 0.76, 1));
+    } else {
+      const descent = 1 - eased;
+      surfaceStage.ship.position.set(descent * 8, 1.55 + descent * 50, -descent * 10);
+      surfaceStage.ship.rotation.z = Math.sin(phase.progress * Math.PI) * 0.055;
+      surfaceStage.ship.rotation.x = -descent * 0.045;
+      surfaceStage.landingGear.visible = phase.progress > 0.68;
+      setSurfaceOpacity(surfaceStage, THREE.MathUtils.smoothstep(phase.progress, 0.02, 0.2));
     }
-    const progress = resolveCockpitProgress(frame);
-    const fade = THREE.MathUtils.clamp(1 - progress / 0.16, 0, 1);
-    departureScenery.group.visible = fade > 0.01;
-    if (!departureScenery.group.visible) return;
-    const originEntry = bodyEntries.get(frame.state.origin);
-    departureScenery.group.position.copy(originEntry.group.position);
-    departureScenery.group.scale.setScalar(Math.max(2.2, originEntry.displayRadius * 1.15));
-    departureScenery.group.rotation.y = frame.sceneTime * 0.12;
-    departureScenery.group.rotation.z = Math.sin(frame.sceneTime * 0.18) * 0.08;
-    for (const material of departureScenery.materials) material.opacity = material.userData.baseOpacity * fade;
+
+    const thrust = phase.mode === "launch" ? 1 - phase.progress * 0.28 : 0.3 + (1 - phase.progress) * 0.42;
+    surfaceStage.exhaust.scale.y = 0.7 + thrust * (1.8 + Math.sin(frame.sceneTime * 18) * 0.16);
+    surfaceStage.exhaust.material.opacity = (0.42 + thrust * 0.45) * surfaceStage.opacity;
+    surfaceStage.ship.rotation.y = Math.sin(frame.sceneTime * 0.34) * 0.025;
+    surfaceStage.padRing.rotation.z = frame.sceneTime * 0.08;
+    surfaceStage.beaconRing.rotation.z = -frame.sceneTime * 0.11;
+    surfaceStage.dust.rotation.y = frame.sceneTime * 0.025;
+    surfaceStage.cloudLayers.forEach((layer, index) => {
+      layer.position.x = Math.sin(frame.sceneTime * (0.025 + index * 0.006) + index) * 8;
+      layer.rotation.z = frame.sceneTime * (index % 2 ? -0.008 : 0.006);
+    });
+  }
+
+  function resolveSurfacePhase(frame) {
+    if (frame.state.viewMode !== "cockpit" || !frame.state.missionRoute) return null;
+    if (!frame.state.launchSequenceComplete) {
+      return { mode: "launch", progress: THREE.MathUtils.clamp(frame.state.launchSequenceProgress || 0, 0, 1) };
+    }
+    if (frame.state.landingSequenceActive || frame.state.routeProgress >= 1) {
+      return {
+        mode: "landing",
+        progress: frame.state.routeProgress >= 1 ? 1 : THREE.MathUtils.clamp(frame.state.landingSequenceProgress || 0, 0, 1),
+      };
+    }
+    return null;
   }
 
   function updateOortCloud(frame) {
@@ -261,7 +302,7 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
   }
 
   function updateRouteGates(frame) {
-    const cockpit = frame.state.viewMode === "cockpit" && routeCurve;
+    const cockpit = frame.state.viewMode === "cockpit" && routeCurve && !resolveSurfacePhase(frame);
     routeState.gates.visible = Boolean(cockpit);
     if (!cockpit) return;
 
@@ -285,6 +326,11 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
   }
 
   function updateCamera(frame) {
+    const surfacePhase = resolveSurfacePhase(frame);
+    if (surfacePhase && routeCurve) {
+      updateSurfaceCamera(frame, surfacePhase);
+      return;
+    }
     if (frame.state.viewMode === "cockpit" && routeCurve) {
       updateCockpitCamera(frame);
       return;
@@ -329,6 +375,72 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
     camera.up.set(0, 1, 0);
     camera.lookAt(currentTarget);
     camera.fov = THREE.MathUtils.lerp(camera.fov, frame.state.viewMode === "destination" ? 36 : 42, cameraAmount);
+    camera.updateProjectionMatrix();
+  }
+
+  function updateSurfaceCamera(frame, phase) {
+    const bodyId = phase.mode === "launch" ? frame.state.origin : frame.state.destination;
+    const entry = bodyEntries.get(bodyId);
+    if (!entry) return;
+    const centerData = getBodyPosition(bodyId, frame.ephemerisDay ?? frame.state.day);
+    const center = new THREE.Vector3(centerData.x, centerData.y, centerData.z);
+    const surfaceOrigin = center.clone().addScaledVector(
+      UP,
+      entry.displayRadius + (surfaceStage.preset.platform ? 1.8 : 0.12),
+    );
+    const shipWorld = surfaceOrigin.clone().add(surfaceStage.ship.position);
+    const progress = THREE.MathUtils.clamp(phase.progress, 0, 1);
+    const eased = smootherstep(progress);
+
+    if (phase.mode === "launch") {
+      const tangent = routeCurve.getTangentAt(0.008).normalize();
+      const side = new THREE.Vector3().crossVectors(tangent, UP);
+      if (side.lengthSq() < 0.0001) side.set(1, 0, 0);
+      else side.normalize();
+      const exteriorCamera = surfaceOrigin
+        .clone()
+        .add(new THREE.Vector3(15 + eased * 5, 7 + eased * 20, 22 + eased * 8));
+      const departureCamera = center
+        .clone()
+        .addScaledVector(tangent, -(entry.displayRadius * 2.7 + 8))
+        .addScaledVector(UP, entry.displayRadius * 0.7 + 1.5)
+        .addScaledVector(side, entry.displayRadius * 1.25);
+      const cockpitBlend = THREE.MathUtils.smoothstep(progress, 0.74, 1);
+      desiredCamera.copy(exteriorCamera).lerp(departureCamera, cockpitBlend);
+      const exteriorLook = shipWorld.clone().addScaledVector(UP, 0.8 + eased * 2.2);
+      const departureLook = center.clone().addScaledVector(UP, entry.displayRadius * 0.12);
+      lookTarget.copy(exteriorLook).lerp(departureLook, cockpitBlend);
+      const amount = 1 - Math.exp(-frame.dt * 4.8);
+      camera.position.lerp(desiredCamera, amount);
+      currentTarget.lerp(lookTarget, amount);
+      camera.fov = THREE.MathUtils.lerp(camera.fov, THREE.MathUtils.lerp(47, width <= 760 ? 63 : 56, cockpitBlend), amount);
+    } else {
+      const finalTangent = routeCurve.getTangentAt(0.999).normalize();
+      const finalSide = new THREE.Vector3().crossVectors(finalTangent, UP);
+      if (finalSide.lengthSq() < 0.0001) finalSide.set(1, 0, 0);
+      else finalSide.normalize();
+      const arrivalDistance = entry.displayRadius * (entry.body.ringed ? 8.2 : 5.2) + 9;
+      const arrivalCamera = center
+        .clone()
+        .addScaledVector(finalTangent, -arrivalDistance)
+        .addScaledVector(UP, entry.displayRadius * 0.72 + 2)
+        .addScaledVector(finalSide, entry.displayRadius * 0.9 + 1.8);
+      const exteriorCamera = surfaceOrigin
+        .clone()
+        .add(new THREE.Vector3(14 - eased * 2, surfaceStage.ship.position.y + 8 - eased * 4, 25 - eased * 7));
+      const exteriorBlend = THREE.MathUtils.smoothstep(progress, 0.02, 0.18);
+      desiredCamera.copy(arrivalCamera).lerp(exteriorCamera, exteriorBlend);
+      const orbitalLook = center.clone().addScaledVector(UP, entry.displayRadius * 0.15);
+      const landingLook = shipWorld.clone().addScaledVector(UP, progress > 0.72 ? 0.8 : -2.4);
+      lookTarget.copy(orbitalLook).lerp(landingLook, exteriorBlend);
+      const amount = 1 - Math.exp(-frame.dt * (3.5 + progress * 1.5));
+      camera.position.lerp(desiredCamera, amount);
+      currentTarget.lerp(lookTarget, amount);
+      camera.fov = THREE.MathUtils.lerp(camera.fov, THREE.MathUtils.lerp(43, 48, exteriorBlend), amount);
+    }
+
+    camera.up.set(0, 1, 0);
+    camera.lookAt(currentTarget);
     camera.updateProjectionMatrix();
   }
 
@@ -860,50 +972,341 @@ function createRouteState(glowTexture) {
   return { tube, glowLine, flowGroup, flow, ship, gates, gateMeshes };
 }
 
-function createDepartureScenery(glowTexture) {
+const SURFACE_PRESETS = {
+  mercury: { ground: 0x6e6861, rock: 0xaaa092, haze: 0x181716, accent: 0xcab79c, relief: 2.8 },
+  venus: { ground: 0x77502f, rock: 0xc78342, haze: 0x8c5f22, accent: 0xffc567, relief: 3.8, clouds: true },
+  earth: { ground: 0x3f6a50, rock: 0x829579, haze: 0x315f78, accent: 0x8de5f2, relief: 2.2, liquid: true, clouds: true },
+  moon: { ground: 0x777570, rock: 0xb2ada3, haze: 0x090a0b, accent: 0xd8d4c9, relief: 3.1 },
+  mars: { ground: 0x7c3422, rock: 0xb85d38, haze: 0x6c2c1d, accent: 0xff9b63, relief: 3.7 },
+  phobos: { ground: 0x4b443d, rock: 0x81756a, haze: 0x09090a, accent: 0xc0ad98, relief: 4.4 },
+  deimos: { ground: 0x514a43, rock: 0x8c8175, haze: 0x09090a, accent: 0xc8b9a7, relief: 3.4 },
+  ceres: { ground: 0x4b4c4c, rock: 0x8f9190, haze: 0x0b0d0e, accent: 0xc9e3e7, relief: 3.4, ice: true },
+  jupiter: { ground: 0x9b6a45, rock: 0xcda173, haze: 0x8e5c38, accent: 0xffd09a, relief: 0.5, clouds: true, platform: true },
+  io: { ground: 0x8d6a22, rock: 0xd5b23f, haze: 0x3d260c, accent: 0xffe168, relief: 4.2, lava: true },
+  europa: { ground: 0x87959a, rock: 0xc6d4d4, haze: 0x102026, accent: 0xbdf4ff, relief: 1.2, ice: true },
+  ganymede: { ground: 0x5f5146, rock: 0x978578, haze: 0x151719, accent: 0xb9d7df, relief: 2.8, ice: true },
+  callisto: { ground: 0x463d35, rock: 0x7d6d5d, haze: 0x101112, accent: 0xc4b39d, relief: 3.7 },
+  saturn: { ground: 0xb69b72, rock: 0xd8c298, haze: 0x8a7659, accent: 0xffe1a3, relief: 0.4, clouds: true, platform: true },
+  enceladus: { ground: 0x9eafb3, rock: 0xd8eef1, haze: 0x183039, accent: 0xc8f7ff, relief: 1.6, ice: true },
+  rhea: { ground: 0x777a79, rock: 0xb9bfbd, haze: 0x101516, accent: 0xd7eeee, relief: 2.6, ice: true },
+  titan: { ground: 0x695229, rock: 0xaa8140, haze: 0x8d6125, accent: 0xffc45f, relief: 1.4, liquid: true, clouds: true },
+  iapetus: { ground: 0x403a34, rock: 0x968d82, haze: 0x0d0e0f, accent: 0xd2c8bb, relief: 4.6 },
+  uranus: { ground: 0x548e96, rock: 0x91d7dd, haze: 0x386b75, accent: 0xb7f4f6, relief: 0.35, clouds: true, platform: true },
+  miranda: { ground: 0x686e70, rock: 0xaeb9bb, haze: 0x101617, accent: 0xd0f0f2, relief: 4.8, ice: true },
+  ariel: { ground: 0x727c7d, rock: 0xb7c8c8, haze: 0x10191b, accent: 0xd2f4f5, relief: 2.9, ice: true },
+  titania: { ground: 0x626969, rock: 0xaab4b1, haze: 0x111819, accent: 0xcce9e5, relief: 3.2, ice: true },
+  oberon: { ground: 0x514c49, rock: 0x8c8581, haze: 0x101314, accent: 0xc9d8d8, relief: 3.6, ice: true },
+  neptune: { ground: 0x31578d, rock: 0x6ea4d8, haze: 0x183b67, accent: 0x88c8ff, relief: 0.45, clouds: true, platform: true },
+  triton: { ground: 0x807c79, rock: 0xc0bbba, haze: 0x151d22, accent: 0xcdf2ff, relief: 2.4, ice: true },
+  oort: { ground: 0x536a70, rock: 0xa9ced4, haze: 0x102329, accent: 0xc9f6ff, relief: 4.2, ice: true },
+};
+
+function createSurfaceStage(glowTexture) {
   const group = new THREE.Group();
   group.visible = false;
-  const materials = [];
-  const ringSpecs = [
-    { radius: 1.7, tube: 0.018, color: 0x91d9e5, opacity: 0.48, x: 1.18, z: 0.12 },
-    { radius: 2.2, tube: 0.012, color: 0xf1b75c, opacity: 0.34, x: 0.72, z: -0.34 },
-    { radius: 2.7, tube: 0.009, color: 0xc7eff4, opacity: 0.22, x: 1.5, z: 0.48 },
-  ];
-  for (const spec of ringSpecs) {
-    const material = new THREE.MeshBasicMaterial({
-      color: spec.color,
-      transparent: true,
-      opacity: spec.opacity,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    material.userData.baseOpacity = spec.opacity;
-    materials.push(material);
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(spec.radius, spec.tube, 6, 96), material);
-    ring.rotation.x = spec.x;
-    ring.rotation.z = spec.z;
-    group.add(ring);
+  const fadeMaterials = [];
+  const register = (material, opacity = material.opacity ?? 1) => {
+    material.transparent = true;
+    material.userData.surfaceBaseOpacity = opacity;
+    material.opacity = opacity;
+    fadeMaterials.push(material);
+    return material;
+  };
+
+  const groundGeometry = new THREE.PlaneGeometry(190, 190, 48, 48);
+  groundGeometry.rotateX(-Math.PI / 2);
+  const groundMaterial = register(
+    new THREE.MeshStandardMaterial({ color: 0x29433a, roughness: 0.94, metalness: 0, side: THREE.DoubleSide }),
+  );
+  const ground = new THREE.Mesh(groundGeometry, groundMaterial);
+  ground.receiveShadow = true;
+  group.add(ground);
+
+  const liquidMaterial = register(
+    new THREE.MeshStandardMaterial({ color: 0x18455b, roughness: 0.28, metalness: 0.08, side: THREE.DoubleSide }),
+    0.78,
+  );
+  const liquid = new THREE.Mesh(new THREE.CircleGeometry(92, 96), liquidMaterial);
+  liquid.rotation.x = -Math.PI / 2;
+  liquid.position.y = 0.08;
+  group.add(liquid);
+
+  const rockMaterial = register(new THREE.MeshStandardMaterial({ color: 0x72846c, roughness: 0.98, flatShading: true }));
+  const rocks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(1, 1), rockMaterial, 58);
+  group.add(rocks);
+  const ridgeMaterial = register(new THREE.MeshStandardMaterial({ color: 0x657465, roughness: 1, flatShading: true }));
+  const ridges = new THREE.InstancedMesh(new THREE.ConeGeometry(1, 2.6, 6), ridgeMaterial, 24);
+  group.add(ridges);
+
+  const padMaterial = register(
+    new THREE.MeshStandardMaterial({ color: 0x202a2e, emissive: 0x132f38, emissiveIntensity: 0.65, roughness: 0.56, metalness: 0.5 }),
+  );
+  const pad = new THREE.Mesh(new THREE.CylinderGeometry(7.2, 8, 0.58, 48), padMaterial);
+  pad.position.y = 0.22;
+  group.add(pad);
+  const padRingMaterial = register(
+    new THREE.MeshBasicMaterial({ color: 0x91d9e5, blending: THREE.AdditiveBlending, depthWrite: false }),
+    0.78,
+  );
+  const padRing = new THREE.Mesh(new THREE.TorusGeometry(5.35, 0.08, 8, 96), padRingMaterial);
+  padRing.rotation.x = Math.PI / 2;
+  padRing.position.y = 0.56;
+  group.add(padRing);
+  const beaconRingMaterial = register(
+    new THREE.MeshBasicMaterial({ color: 0xf1b75c, blending: THREE.AdditiveBlending, depthWrite: false }),
+    0.48,
+  );
+  const beaconRing = new THREE.Mesh(new THREE.TorusGeometry(8.8, 0.035, 6, 96), beaconRingMaterial);
+  beaconRing.rotation.x = Math.PI / 2;
+  beaconRing.position.y = 0.7;
+  group.add(beaconRing);
+
+  const platform = new THREE.Group();
+  const platformMaterial = register(
+    new THREE.MeshStandardMaterial({ color: 0x26383e, emissive: 0x173943, emissiveIntensity: 0.74, roughness: 0.42, metalness: 0.72 }),
+  );
+  const platformBase = new THREE.Mesh(new THREE.CylinderGeometry(16, 12, 2.2, 12), platformMaterial);
+  platformBase.position.y = -0.8;
+  platform.add(platformBase);
+  for (let index = 0; index < 4; index += 1) {
+    const spar = new THREE.Mesh(new THREE.BoxGeometry(30, 0.35, 1.2), platformMaterial);
+    spar.rotation.y = (index / 4) * Math.PI;
+    spar.position.y = -0.1;
+    platform.add(spar);
+  }
+  group.add(platform);
+
+  const cloudLayers = [];
+  for (let index = 0; index < 3; index += 1) {
+    const cloudMaterial = register(
+      new THREE.MeshBasicMaterial({ color: 0xd8e7e8, side: THREE.DoubleSide, depthWrite: false }),
+      0.12 - index * 0.02,
+    );
+    const layer = new THREE.Mesh(new THREE.CircleGeometry(108 - index * 12, 64), cloudMaterial);
+    layer.rotation.x = -Math.PI / 2;
+    layer.position.y = 10 + index * 9;
+    group.add(layer);
+    cloudLayers.push(layer);
   }
 
-  for (let index = 0; index < 12; index += 1) {
-    const material = new THREE.SpriteMaterial({
-      map: glowTexture,
-      color: index % 3 === 0 ? 0xf1b75c : 0x91d9e5,
-      transparent: true,
-      opacity: 0.62,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-    });
-    material.userData.baseOpacity = 0.62;
-    materials.push(material);
-    const beacon = new THREE.Sprite(material);
-    const angle = (index / 12) * TAU;
-    const radius = 1.9 + (index % 4) * 0.22;
-    beacon.position.set(Math.cos(angle) * radius, Math.sin(angle * 2.1) * 0.35, Math.sin(angle) * radius);
-    beacon.scale.setScalar(index % 3 === 0 ? 0.18 : 0.1);
-    group.add(beacon);
+  const hazeMaterial = register(
+    new THREE.MeshBasicMaterial({ color: 0x315f78, side: THREE.BackSide, depthWrite: false }),
+    0.22,
+  );
+  const haze = new THREE.Mesh(new THREE.SphereGeometry(138, 32, 20), hazeMaterial);
+  haze.scale.y = 0.58;
+  haze.position.y = 18;
+  group.add(haze);
+
+  const dustPositions = new Float32Array(420 * 3);
+  for (let index = 0; index < 420; index += 1) {
+    const angle = seededUnit(index * 17 + 3) * TAU;
+    const radius = 12 + seededUnit(index * 23 + 9) * 76;
+    dustPositions[index * 3] = Math.cos(angle) * radius;
+    dustPositions[index * 3 + 1] = 0.7 + seededUnit(index * 31 + 5) * 22;
+    dustPositions[index * 3 + 2] = Math.sin(angle) * radius;
   }
-  return { group, materials };
+  const dustGeometry = new THREE.BufferGeometry();
+  dustGeometry.setAttribute("position", new THREE.BufferAttribute(dustPositions, 3));
+  const dustMaterial = register(
+    new THREE.PointsMaterial({ color: 0xc5d8d8, size: 0.22, sizeAttenuation: true, depthWrite: false }),
+    0.42,
+  );
+  const dust = new THREE.Points(dustGeometry, dustMaterial);
+  group.add(dust);
+
+  const craft = createCinematicShip(glowTexture);
+  group.add(craft.ship);
+  fadeMaterials.push(...craft.fadeMaterials);
+
+  return {
+    group,
+    ground,
+    groundGeometry,
+    groundMaterial,
+    liquid,
+    liquidMaterial,
+    rocks,
+    rockMaterial,
+    ridges,
+    ridgeMaterial,
+    platform,
+    platformMaterial,
+    pad,
+    padMaterial,
+    padRing,
+    padRingMaterial,
+    beaconRing,
+    beaconRingMaterial,
+    cloudLayers,
+    haze,
+    hazeMaterial,
+    dust,
+    dustMaterial,
+    ship: craft.ship,
+    exhaust: craft.exhaust,
+    landingGear: craft.landingGear,
+    shipAccentMaterials: craft.accentMaterials,
+    fadeMaterials,
+    preset: SURFACE_PRESETS.earth,
+    bodyId: null,
+    opacity: 1,
+  };
+}
+
+function createCinematicShip(glowTexture) {
+  const ship = new THREE.Group();
+  const fadeMaterials = [];
+  const register = (material, opacity = material.opacity ?? 1) => {
+    material.transparent = true;
+    material.opacity = opacity;
+    material.userData.surfaceBaseOpacity = opacity;
+    fadeMaterials.push(material);
+    return material;
+  };
+  const hullMaterial = register(
+    new THREE.MeshStandardMaterial({ color: 0xc6d2d5, emissive: 0x15262b, emissiveIntensity: 0.5, roughness: 0.36, metalness: 0.72 }),
+  );
+  const accentMaterial = register(
+    new THREE.MeshStandardMaterial({ color: 0xf1b75c, emissive: 0xf1b75c, emissiveIntensity: 1.2, roughness: 0.3, metalness: 0.56 }),
+  );
+  const glassMaterial = register(
+    new THREE.MeshStandardMaterial({ color: 0x174456, emissive: 0x5ed8ff, emissiveIntensity: 1.15, roughness: 0.14, metalness: 0.38 }),
+    0.9,
+  );
+  const darkMaterial = register(
+    new THREE.MeshStandardMaterial({ color: 0x172025, roughness: 0.62, metalness: 0.68 }),
+  );
+
+  const hull = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 1.08, 4.9, 18), hullMaterial);
+  hull.position.y = 0.15;
+  ship.add(hull);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.79, 2.2, 18), hullMaterial);
+  nose.position.y = 3.7;
+  ship.add(nose);
+  const windowBand = new THREE.Mesh(new THREE.CylinderGeometry(0.81, 0.86, 0.72, 18), glassMaterial);
+  windowBand.position.y = 2.34;
+  ship.add(windowBand);
+  const wing = new THREE.Mesh(new THREE.BoxGeometry(4.9, 0.16, 1.2), darkMaterial);
+  wing.position.y = -0.55;
+  ship.add(wing);
+  const tailWing = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.18, 3.8), darkMaterial);
+  tailWing.position.y = -0.82;
+  ship.add(tailWing);
+  for (const x of [-1.65, 1.65]) {
+    const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.46, 1.85, 12), accentMaterial);
+    engine.position.set(x, -1.05, 0);
+    ship.add(engine);
+  }
+
+  const exhaustMaterial = register(
+    new THREE.MeshBasicMaterial({ map: glowTexture, color: 0x72dcff, blending: THREE.AdditiveBlending, depthWrite: false }),
+    0.82,
+  );
+  const exhaust = new THREE.Mesh(new THREE.ConeGeometry(1.12, 5.8, 18, 1, true), exhaustMaterial);
+  exhaust.rotation.z = Math.PI;
+  exhaust.position.y = -5.35;
+  ship.add(exhaust);
+
+  const landingGear = new THREE.Group();
+  for (const [x, z] of [[-1.2, -0.7], [1.2, -0.7], [-1.2, 0.7], [1.2, 0.7]]) {
+    const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 1.7, 8), darkMaterial);
+    strut.position.set(x, -2.7, z);
+    strut.rotation.z = x > 0 ? -0.25 : 0.25;
+    landingGear.add(strut);
+  }
+  ship.add(landingGear);
+  ship.scale.setScalar(1.16);
+  return { ship, exhaust, landingGear, fadeMaterials, accentMaterials: [accentMaterial, glassMaterial] };
+}
+
+function configureSurfaceStage(stage, body, visual) {
+  if (stage.bodyId === body.id) return;
+  stage.bodyId = body.id;
+  const fallback = {
+    ground: new THREE.Color(visual.palette?.[0] || body.color).getHex(),
+    rock: new THREE.Color(visual.palette?.[1] || body.accent).getHex(),
+    haze: new THREE.Color(visual.glow || visual.haze || body.color).multiplyScalar(0.55).getHex(),
+    accent: new THREE.Color(body.accent || 0x91d9e5).getHex(),
+    relief: body.family === "卫星" ? 3 : 2,
+    ice: visual.kind === "ice" || visual.kind === "iceRock",
+    clouds: ["gas", "iceGiant", "clouded", "haze"].includes(visual.kind),
+    platform: ["gas", "iceGiant"].includes(visual.kind),
+  };
+  const preset = { ...fallback, ...(SURFACE_PRESETS[body.id] || {}) };
+  stage.preset = preset;
+  stage.groundMaterial.color.setHex(preset.ground);
+  stage.groundMaterial.emissive.setHex(preset.lava ? 0x351006 : preset.ice ? 0x10262b : 0x090c0d);
+  stage.groundMaterial.emissiveIntensity = preset.lava ? 0.75 : preset.ice ? 0.35 : 0.18;
+  stage.rockMaterial.color.setHex(preset.rock);
+  stage.ridgeMaterial.color.setHex(new THREE.Color(preset.rock).multiplyScalar(0.72).getHex());
+  stage.hazeMaterial.color.setHex(preset.haze);
+  stage.dustMaterial.color.setHex(preset.accent);
+  stage.padRingMaterial.color.setHex(preset.accent);
+  stage.beaconRingMaterial.color.setHex(preset.lava ? 0xff7b32 : 0xf1b75c);
+  stage.liquidMaterial.color.setHex(body.id === "titan" ? 0x3b2b17 : 0x164a63);
+  stage.liquid.visible = Boolean(preset.liquid);
+  stage.platform.visible = Boolean(preset.platform);
+  stage.rocks.visible = !preset.platform;
+  stage.ridges.visible = !preset.platform;
+  stage.cloudLayers.forEach((layer, index) => {
+    layer.visible = Boolean(preset.clouds);
+    layer.material.color.setHex(index === 0 ? preset.rock : preset.accent);
+  });
+  stage.shipAccentMaterials[0].color.setHex(preset.accent);
+  stage.shipAccentMaterials[0].emissive.setHex(preset.accent);
+  stage.shipAccentMaterials[1].emissive.setHex(preset.accent);
+
+  const seed = hashString(body.id);
+  const positions = stage.groundGeometry.attributes.position;
+  for (let index = 0; index < positions.count; index += 1) {
+    const x = positions.getX(index);
+    const z = positions.getZ(index);
+    const distance = Math.hypot(x, z);
+    const flatten = THREE.MathUtils.smoothstep(distance, 8, 18);
+    const waves =
+      Math.sin(x * 0.11 + seed * 0.001) * 0.48 +
+      Math.cos(z * 0.085 - seed * 0.002) * 0.38 +
+      Math.sin((x + z) * 0.037 + seed) * 0.7;
+    const crater = -Math.max(0, Math.sin(distance * 0.17 + seed * 0.01)) * 0.34;
+    positions.setY(index, (waves + crater) * preset.relief * flatten);
+  }
+  positions.needsUpdate = true;
+  stage.groundGeometry.computeVertexNormals();
+
+  const matrix = new THREE.Matrix4();
+  const quaternion = new THREE.Quaternion();
+  const scale = new THREE.Vector3();
+  const position = new THREE.Vector3();
+  for (let index = 0; index < stage.rocks.count; index += 1) {
+    const angle = seededUnit(seed + index * 17) * TAU;
+    const radius = 16 + seededUnit(seed + index * 23) * 72;
+    const size = 0.45 + seededUnit(seed + index * 29) * (preset.relief * 0.8 + 1.2);
+    position.set(Math.cos(angle) * radius, size * 0.42 - 0.2, Math.sin(angle) * radius);
+    quaternion.setFromEuler(new THREE.Euler(index * 0.19, angle, index * 0.11));
+    scale.set(size, size * (0.65 + seededUnit(seed + index * 31)), size * 1.15);
+    matrix.compose(position, quaternion, scale);
+    stage.rocks.setMatrixAt(index, matrix);
+  }
+  stage.rocks.instanceMatrix.needsUpdate = true;
+  for (let index = 0; index < stage.ridges.count; index += 1) {
+    const angle = seededUnit(seed + index * 37) * TAU;
+    const radius = 28 + seededUnit(seed + index * 41) * 58;
+    const size = 2.5 + seededUnit(seed + index * 43) * (3 + preset.relief);
+    position.set(Math.cos(angle) * radius, size * 0.72 - 0.4, Math.sin(angle) * radius);
+    quaternion.setFromEuler(new THREE.Euler(0, angle, (seededUnit(seed + index * 47) - 0.5) * 0.24));
+    scale.set(size * 1.4, size, size * 0.9);
+    matrix.compose(position, quaternion, scale);
+    stage.ridges.setMatrixAt(index, matrix);
+  }
+  stage.ridges.instanceMatrix.needsUpdate = true;
+}
+
+function setSurfaceOpacity(stage, opacity) {
+  stage.opacity = THREE.MathUtils.clamp(opacity, 0, 1);
+  for (const material of stage.fadeMaterials) {
+    material.opacity = (material.userData.surfaceBaseOpacity ?? 1) * stage.opacity;
+  }
 }
 
 function createOortCloud() {
@@ -1046,7 +1449,10 @@ function createCockpitStreaks() {
 }
 
 function updateCockpitStreaks(frame, streaks) {
-  const active = frame.state.viewMode === "cockpit";
+  const surfaceSequence =
+    frame.state.missionRoute &&
+    (!frame.state.launchSequenceComplete || frame.state.landingSequenceActive || frame.state.routeProgress >= 1);
+  const active = frame.state.viewMode === "cockpit" && !surfaceSequence;
   streaks.lines.visible = active;
   if (!active) return;
   const routeProgress = frame.state.missionActive || frame.state.routeProgress > 0 ? frame.state.routeProgress : 0.015;
@@ -1147,4 +1553,9 @@ function intersects(a, b) {
 
 function wrap(value) {
   return ((value % 1) + 1) % 1;
+}
+
+function smootherstep(value) {
+  const amount = THREE.MathUtils.clamp(value, 0, 1);
+  return amount * amount * amount * (amount * (amount * 6 - 15) + 10);
 }
