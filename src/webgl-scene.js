@@ -139,7 +139,18 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
 
   function updateSurfaceStage(frame) {
     const phase = resolveSurfacePhase(frame);
-    surfaceStage.group.visible = Boolean(phase);
+    const surfaceActive = Boolean(phase);
+    const surfaceIsolation = !phase
+      ? 0
+      : phase.mode === "launch"
+        ? 1 - THREE.MathUtils.smoothstep(phase.progress, 0.76, 1)
+        : THREE.MathUtils.smoothstep(phase.progress, 0.02, 0.2);
+    const isolateLandscape = surfaceIsolation > 0.02;
+    surfaceStage.group.visible = surfaceActive;
+    systemGroup.visible = !isolateLandscape;
+    orbitGroup.visible = !isolateLandscape;
+    routeGroup.visible = !isolateLandscape;
+    oortCloud.group.visible = !isolateLandscape;
     if (!phase) return;
 
     const bodyId = phase.mode === "launch" ? frame.state.origin : frame.state.destination;
@@ -155,14 +166,14 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
 
     const eased = smootherstep(phase.progress);
     if (phase.mode === "launch") {
-      surfaceStage.ship.position.set(eased * 7, 1.6 + eased * 48, -eased * 9);
+      surfaceStage.ship.position.set(eased * 7, 2.5 + eased * 48, -eased * 9);
       surfaceStage.ship.rotation.z = -eased * 0.08;
       surfaceStage.ship.rotation.x = eased * 0.04;
       surfaceStage.landingGear.visible = phase.progress < 0.24;
       setSurfaceOpacity(surfaceStage, 1 - THREE.MathUtils.smoothstep(phase.progress, 0.76, 1));
     } else {
       const descent = 1 - eased;
-      surfaceStage.ship.position.set(descent * 8, 1.55 + descent * 50, -descent * 10);
+      surfaceStage.ship.position.set(descent * 8, 2.45 + descent * 50, -descent * 10);
       surfaceStage.ship.rotation.z = Math.sin(phase.progress * Math.PI) * 0.055;
       surfaceStage.ship.rotation.x = -descent * 0.045;
       surfaceStage.landingGear.visible = phase.progress > 0.68;
@@ -361,7 +372,7 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
       const tangent = routeCurve.getTangentAt(progress).normalize();
       routeState.ship.position.copy(point);
       routeState.ship.quaternion.setFromUnitVectors(UP, tangent);
-      routeState.ship.material.color.copy(vehicleColor);
+      routeState.shipMaterial.color.copy(vehicleColor);
     }
 
     updateRouteGates(frame);
@@ -1038,10 +1049,8 @@ function createRouteState(glowTexture) {
     flowGroup.add(sprite);
   }
 
-  const ship = new THREE.Mesh(
-    new THREE.ConeGeometry(1.2, 4.2, 4),
-    new THREE.MeshBasicMaterial({ color: 0xf1b75c }),
-  );
+  const shipMaterial = new THREE.MeshBasicMaterial({ color: 0xf1b75c });
+  const ship = createCompactRouteShip(shipMaterial);
   ship.visible = false;
 
   const gates = new THREE.Group();
@@ -1056,7 +1065,25 @@ function createRouteState(glowTexture) {
     gates.add(gate);
   }
 
-  return { tube, glowLine, flowGroup, flow, ship, gates, gateMeshes };
+  return { tube, glowLine, flowGroup, flow, ship, shipMaterial, gates, gateMeshes };
+}
+
+function createCompactRouteShip(material) {
+  const ship = new THREE.Group();
+  const hull = new THREE.Mesh(new THREE.SphereGeometry(0.72, 14, 10), material);
+  hull.scale.set(0.82, 1.85, 0.9);
+  ship.add(hull);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.62, 1.5, 5), material);
+  nose.position.y = 1.85;
+  ship.add(nose);
+  const wings = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.12, 1.25), material);
+  wings.position.y = -0.18;
+  ship.add(wings);
+  const tail = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.16, 2.6), material);
+  tail.position.y = -0.72;
+  ship.add(tail);
+  ship.scale.setScalar(0.86);
+  return ship;
 }
 
 const SURFACE_PRESETS = {
@@ -1256,59 +1283,124 @@ function createCinematicShip(glowTexture) {
     return material;
   };
   const hullMaterial = register(
-    new THREE.MeshStandardMaterial({ color: 0xc6d2d5, emissive: 0x15262b, emissiveIntensity: 0.5, roughness: 0.36, metalness: 0.72 }),
+    new THREE.MeshStandardMaterial({ color: 0x4f8290, emissive: 0x14323b, emissiveIntensity: 0.58, roughness: 0.42, metalness: 0.68 }),
   );
-  const accentMaterial = register(
-    new THREE.MeshStandardMaterial({ color: 0xf1b75c, emissive: 0xf1b75c, emissiveIntensity: 1.2, roughness: 0.3, metalness: 0.56 }),
+  const panelMaterial = register(
+    new THREE.MeshStandardMaterial({ color: 0xd36e43, emissive: 0x46170b, emissiveIntensity: 0.48, roughness: 0.46, metalness: 0.55 }),
+  );
+  const trimMaterial = register(
+    new THREE.MeshStandardMaterial({ color: 0xe6ad54, emissive: 0x5a300d, emissiveIntensity: 0.58, roughness: 0.34, metalness: 0.7 }),
+  );
+  const navigationMaterial = register(
+    new THREE.MeshStandardMaterial({ color: 0x7be7e2, emissive: 0x5ed8ff, emissiveIntensity: 1.5, roughness: 0.2, metalness: 0.46 }),
   );
   const glassMaterial = register(
-    new THREE.MeshStandardMaterial({ color: 0x174456, emissive: 0x5ed8ff, emissiveIntensity: 1.15, roughness: 0.14, metalness: 0.38 }),
-    0.9,
+    new THREE.MeshStandardMaterial({ color: 0x143a4b, emissive: 0x5ed8ff, emissiveIntensity: 1.28, roughness: 0.12, metalness: 0.42 }),
+    0.92,
   );
   const darkMaterial = register(
-    new THREE.MeshStandardMaterial({ color: 0x172025, roughness: 0.62, metalness: 0.68 }),
+    new THREE.MeshStandardMaterial({ color: 0x172126, roughness: 0.6, metalness: 0.74 }),
   );
 
-  const hull = new THREE.Mesh(new THREE.CylinderGeometry(0.78, 1.08, 4.9, 18), hullMaterial);
-  hull.position.y = 0.15;
+  const hull = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 18), hullMaterial);
+  hull.scale.set(1.18, 2.05, 0.96);
+  hull.position.y = 0.38;
   ship.add(hull);
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.79, 2.2, 18), hullMaterial);
-  nose.position.y = 3.7;
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.98, 2.25, 6), panelMaterial);
+  nose.position.y = 2.72;
+  nose.rotation.y = Math.PI / 6;
   ship.add(nose);
-  const windowBand = new THREE.Mesh(new THREE.CylinderGeometry(0.81, 0.86, 0.72, 18), glassMaterial);
-  windowBand.position.y = 2.34;
-  ship.add(windowBand);
-  const wing = new THREE.Mesh(new THREE.BoxGeometry(4.9, 0.16, 1.2), darkMaterial);
-  wing.position.y = -0.55;
-  ship.add(wing);
-  const tailWing = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.18, 3.8), darkMaterial);
-  tailWing.position.y = -0.82;
-  ship.add(tailWing);
-  for (const x of [-1.65, 1.65]) {
-    const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.46, 1.85, 12), accentMaterial);
-    engine.position.set(x, -1.05, 0);
+  const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.74, 24, 14), glassMaterial);
+  canopy.scale.set(0.82, 1.08, 0.5);
+  canopy.position.set(0, 1.25, 0.78);
+  ship.add(canopy);
+  const canopyFrame = new THREE.Mesh(new THREE.TorusGeometry(0.65, 0.055, 8, 32), trimMaterial);
+  canopyFrame.scale.set(1, 1.28, 1);
+  canopyFrame.position.set(0, 1.2, 1.03);
+  ship.add(canopyFrame);
+
+  for (const side of [-1, 1]) {
+    const wing = new THREE.Mesh(createSweptWingGeometry(side), hullMaterial);
+    ship.add(wing);
+    const wingPanel = new THREE.Mesh(createSweptWingGeometry(side), panelMaterial);
+    wingPanel.scale.set(0.72, 0.72, 0.48);
+    wingPanel.position.z = 0.26;
+    ship.add(wingPanel);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.1, 0.16), panelMaterial);
+    stripe.position.set(side * 2.05, -0.62, 0.28);
+    stripe.rotation.z = side * -0.29;
+    ship.add(stripe);
+    const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.56, 2.05, 14), darkMaterial);
+    engine.position.set(side * 2.62, -0.82, -0.15);
     ship.add(engine);
+    const engineBand = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.58, 0.34, 14), trimMaterial);
+    engineBand.position.set(side * 2.62, -1.28, -0.15);
+    ship.add(engineBand);
+    const engineLight = new THREE.Mesh(new THREE.TorusGeometry(0.43, 0.08, 8, 28), navigationMaterial);
+    engineLight.rotation.x = Math.PI / 2;
+    engineLight.position.set(side * 2.62, -1.91, -0.15);
+    ship.add(engineLight);
   }
+  const belly = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.45, 1.35), darkMaterial);
+  belly.position.set(0, -1.12, -0.06);
+  ship.add(belly);
+  const dorsalFin = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.8, 3), panelMaterial);
+  dorsalFin.position.set(0, -0.55, -1.05);
+  dorsalFin.rotation.x = Math.PI / 2;
+  dorsalFin.rotation.z = Math.PI;
+  ship.add(dorsalFin);
+  const trim = new THREE.Mesh(new THREE.BoxGeometry(0.16, 3.2, 1.08), trimMaterial);
+  trim.position.set(0, 0.2, 0.18);
+  ship.add(trim);
 
   const exhaustMaterial = register(
     new THREE.MeshBasicMaterial({ map: glowTexture, color: 0x72dcff, blending: THREE.AdditiveBlending, depthWrite: false }),
     0.82,
   );
-  const exhaust = new THREE.Mesh(new THREE.ConeGeometry(1.12, 5.8, 18, 1, true), exhaustMaterial);
-  exhaust.rotation.z = Math.PI;
-  exhaust.position.y = -5.35;
+  const exhaust = new THREE.Group();
+  exhaust.material = exhaustMaterial;
+  for (const [x, z, radius, length] of [[-2.62, -0.15, 0.48, 3.5], [2.62, -0.15, 0.48, 3.5], [0, -0.2, 0.38, 2.7]]) {
+    const plume = new THREE.Mesh(new THREE.ConeGeometry(radius, length, 14, 1, true), exhaustMaterial);
+    plume.rotation.z = Math.PI;
+    plume.position.set(x, -2.15 - length * 0.48, z);
+    exhaust.add(plume);
+  }
   ship.add(exhaust);
 
   const landingGear = new THREE.Group();
-  for (const [x, z] of [[-1.2, -0.7], [1.2, -0.7], [-1.2, 0.7], [1.2, 0.7]]) {
-    const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.055, 1.7, 8), darkMaterial);
-    strut.position.set(x, -2.7, z);
-    strut.rotation.z = x > 0 ? -0.25 : 0.25;
+  for (const [x, z] of [[-1.55, -0.45], [1.55, -0.45], [0, 0.72]]) {
+    const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.07, 1.2, 8), darkMaterial);
+    strut.position.set(x, -1.95, z);
+    strut.rotation.z = x === 0 ? 0 : x > 0 ? -0.3 : 0.3;
     landingGear.add(strut);
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.42, 0.12, 12), trimMaterial);
+    foot.position.set(x * 1.08, -2.54, z);
+    landingGear.add(foot);
   }
   ship.add(landingGear);
-  ship.scale.setScalar(1.16);
-  return { ship, exhaust, landingGear, fadeMaterials, accentMaterials: [accentMaterial, glassMaterial] };
+  ship.scale.setScalar(1.08);
+  return { ship, exhaust, landingGear, fadeMaterials, accentMaterials: [navigationMaterial, glassMaterial] };
+}
+
+function createSweptWingGeometry(side) {
+  const thickness = 0.18;
+  const outline = [[0.58, 0.72], [3.85, -0.2], [3.18, -1.9], [0.72, -1.18]];
+  const vertices = [];
+  for (const z of [-thickness, thickness]) {
+    for (const [x, y] of outline) vertices.push(x * side, y, z);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices.flat(), 3));
+  geometry.setIndex([
+    0, 1, 2, 0, 2, 3,
+    4, 6, 5, 4, 7, 6,
+    0, 4, 5, 0, 5, 1,
+    1, 5, 6, 1, 6, 2,
+    2, 6, 7, 2, 7, 3,
+    3, 7, 4, 3, 4, 0,
+  ]);
+  geometry.computeVertexNormals();
+  return geometry;
 }
 
 function configureSurfaceStage(stage, body, visual) {

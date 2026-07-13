@@ -1,5 +1,5 @@
-import { createSolarScene, hasSurfaceLandscape } from "./webgl-scene.js?v=20260713-6";
-import { AU_KM, createAstrodynamicsEngine } from "./astrodynamics.js?v=20260713-6";
+import { createSolarScene, hasSurfaceLandscape } from "./webgl-scene.js?v=20260713-7";
+import { AU_KM, createAstrodynamicsEngine } from "./astrodynamics.js?v=20260713-7";
 
 const TAU = Math.PI * 2;
 const LAUNCH_SEQUENCE_SECONDS = 5.4;
