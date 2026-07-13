@@ -185,7 +185,7 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
   function resolveSurfacePhase(frame) {
     if (frame.state.viewMode !== "cockpit" || !frame.state.missionRoute) return null;
     const activeBodyId = !frame.state.launchSequenceComplete ? frame.state.origin : frame.state.destination;
-    if (!bodyEntries.get(activeBodyId)?.body.surfaceScene) return null;
+    if (!hasSurfaceLandscape(activeBodyId)) return null;
     if (!frame.state.launchSequenceComplete) {
       return { mode: "launch", progress: THREE.MathUtils.clamp(frame.state.launchSequenceProgress || 0, 0, 1) };
     }
@@ -1087,6 +1087,10 @@ const SURFACE_PRESETS = {
   triton: { ground: 0x807c79, rock: 0xc0bbba, haze: 0x151d22, accent: 0xcdf2ff, relief: 2.4, ice: true },
   oort: { ground: 0x536a70, rock: 0xa9ced4, haze: 0x102329, accent: 0xc9f6ff, relief: 4.2, ice: true },
 };
+
+export function hasSurfaceLandscape(bodyId) {
+  return Object.prototype.hasOwnProperty.call(SURFACE_PRESETS, bodyId);
+}
 
 function createSurfaceStage(glowTexture) {
   const group = new THREE.Group();

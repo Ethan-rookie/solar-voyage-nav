@@ -1,5 +1,5 @@
-import { createSolarScene } from "./webgl-scene.js?v=20260713-5";
-import { AU_KM, createAstrodynamicsEngine } from "./astrodynamics.js?v=20260713-5";
+import { createSolarScene, hasSurfaceLandscape } from "./webgl-scene.js?v=20260713-6";
+import { AU_KM, createAstrodynamicsEngine } from "./astrodynamics.js?v=20260713-6";
 
 const TAU = Math.PI * 2;
 const LAUNCH_SEQUENCE_SECONDS = 5.4;
@@ -79,7 +79,6 @@ const BODIES = [
     gravity: "1 g",
     atmosphere: "氮氧大气",
     port: "近地轨道港",
-    surfaceScene: "coast",
   },
   {
     id: "moon",
@@ -116,7 +115,6 @@ const BODIES = [
     gravity: "0.38 g",
     atmosphere: "二氧化碳",
     port: "阿瑞斯轨道港",
-    surfaceScene: "canyon",
   },
   {
     id: "phobos",
@@ -1438,7 +1436,7 @@ function getDisplayedRoute() {
 }
 
 function hasSurfaceScene(bodyId) {
-  return Boolean(bodyById.get(bodyId)?.surfaceScene);
+  return hasSurfaceLandscape(bodyId);
 }
 
 function getLaunchSequenceDuration() {
