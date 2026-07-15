@@ -1,4 +1,5 @@
 import * as THREE from "../vendor/three.module.js";
+import { GLTFLoader } from "../vendor/addons/loaders/GLTFLoader.js";
 
 const TAU = Math.PI * 2;
 const UP = new THREE.Vector3(0, 1, 0);
@@ -77,7 +78,7 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
 
   const routeState = createRouteState(glowTexture);
   routeGroup.add(routeState.tube, routeState.glowLine, routeState.flowGroup, routeState.ship, routeState.gates);
-  const surfaceStage = createSurfaceStage(glowTexture, textureLoader, anisotropy);
+  const surfaceStage = createSurfaceStage(glowTexture, textureLoader, anisotropy, canvas);
   scene.add(surfaceStage.group);
 
   const raycaster = new THREE.Raycaster();
@@ -1151,7 +1152,7 @@ export function hasSurfaceLandscape(bodyId) {
   return Object.prototype.hasOwnProperty.call(SURFACE_PRESETS, bodyId);
 }
 
-function createSurfaceStage(glowTexture, textureLoader, anisotropy) {
+function createSurfaceStage(glowTexture, textureLoader, anisotropy, canvas) {
   const group = new THREE.Group();
   group.visible = false;
   const fadeMaterials = [];
@@ -1293,7 +1294,13 @@ function createSurfaceStage(glowTexture, textureLoader, anisotropy) {
     object.castShadow = true;
     object.receiveShadow = true;
   });
-  group.add(craft.ship);
+  const ship = new THREE.Group();
+  ship.name = "SurfaceShipRig";
+  ship.add(craft.ship);
+  craft.exhaust.removeFromParent();
+  craft.exhaust.scale.setScalar(0.92);
+  ship.add(craft.exhaust);
+  group.add(ship);
   fadeMaterials.push(...craft.fadeMaterials);
 
   const surfaceLight = new THREE.DirectionalLight(0xffe7c4, 3.8);
@@ -1309,7 +1316,7 @@ function createSurfaceStage(glowTexture, textureLoader, anisotropy) {
   surfaceLight.target.position.set(0, 0, 0);
   group.add(surfaceLight, surfaceLight.target, new THREE.HemisphereLight(0xaac5d2, 0x1a1010, 1.25));
 
-  return {
+  const stage = {
     group,
     ground,
     groundGeometry,
@@ -1340,7 +1347,8 @@ function createSurfaceStage(glowTexture, textureLoader, anisotropy) {
     surfaceLight,
     dust,
     dustMaterial,
-    ship: craft.ship,
+    ship,
+    fallbackShip: craft.ship,
     exhaust: craft.exhaust,
     landingGear: craft.landingGear,
     shipAccentMaterials: craft.accentMaterials,
@@ -1348,7 +1356,65 @@ function createSurfaceStage(glowTexture, textureLoader, anisotropy) {
     preset: SURFACE_PRESETS.earth,
     bodyId: null,
     opacity: 1,
+    canvas,
   };
+  canvas.dataset.spacecraft = "procedural-fallback";
+  loadBlenderSurfaceShip(stage);
+  return stage;
+}
+
+function loadBlenderSurfaceShip(stage) {
+  const loader = new GLTFLoader();
+  loader.load(
+    "./assets/models/orbitgo-swept-wing.glb",
+    (gltf) => {
+      const model = gltf.scene;
+      model.name = "OrbitGoBlenderShip";
+      model.rotation.x = Math.PI / 2;
+      model.scale.setScalar(0.92);
+
+      const materials = new Set();
+      model.traverse((object) => {
+        if (!object.isMesh) return;
+        object.castShadow = true;
+        object.receiveShadow = true;
+        const meshMaterials = Array.isArray(object.material) ? object.material : [object.material];
+        for (const material of meshMaterials) {
+          material.transparent = true;
+          material.userData.surfaceBaseOpacity = material.opacity ?? 1;
+          material.needsUpdate = true;
+          materials.add(material);
+        }
+      });
+      stage.fadeMaterials.push(...materials);
+
+      const landingGear = model.getObjectByName("LandingGear");
+      if (landingGear) {
+        const gearWasVisible = stage.landingGear.visible;
+        stage.landingGear = landingGear;
+        stage.landingGear.visible = gearWasVisible;
+      }
+
+      const navigationMaterial = [...materials].find((material) => material.name === "NavigationGlow");
+      const glassMaterial = [...materials].find((material) => material.name === "CockpitGlass");
+      if (navigationMaterial && glassMaterial) {
+        stage.shipAccentMaterials = [navigationMaterial, glassMaterial];
+        navigationMaterial.color.setHex(stage.preset.accent);
+        navigationMaterial.emissive?.setHex(stage.preset.accent);
+        glassMaterial.emissive?.setHex(stage.preset.accent);
+      }
+
+      stage.ship.add(model);
+      stage.fallbackShip.visible = false;
+      stage.blenderShip = model;
+      stage.canvas.dataset.spacecraft = "blender-glb";
+      setSurfaceOpacity(stage, stage.opacity);
+    },
+    undefined,
+    () => {
+      stage.canvas.dataset.spacecraft = "procedural-fallback";
+    },
+  );
 }
 
 function createCinematicShip(glowTexture) {
