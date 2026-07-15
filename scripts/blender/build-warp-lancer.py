@@ -71,7 +71,7 @@ def create_prism(name, outline, depth, material, bevel=0.06, parent=None):
     return apply_bevel(obj, bevel, 3) if bevel else obj
 
 
-def add_uv_sphere(name, location, scale, material, parent, segments=40, rings=24):
+def add_uv_sphere(name, location, scale, material, parent, segments=32, rings=18):
     bpy.ops.mesh.primitive_uv_sphere_add(segments=segments, ring_count=rings, location=location)
     obj = bpy.context.object
     obj.name = name
@@ -108,7 +108,7 @@ def add_beam_xy(name, start, end, z, width, height, material, parent, bevel=0.02
     )
 
 
-def add_cylinder(name, location, radius, depth, material, parent, vertices=32):
+def add_cylinder(name, location, radius, depth, material, parent, vertices=24):
     bpy.ops.mesh.primitive_cylinder_add(
         vertices=vertices,
         radius=radius,
@@ -123,12 +123,12 @@ def add_cylinder(name, location, radius, depth, material, parent, vertices=32):
     return shade_smooth(obj)
 
 
-def add_torus(name, location, major_radius, minor_radius, material, parent, major_segments=56):
+def add_torus(name, location, major_radius, minor_radius, material, parent, major_segments=40):
     bpy.ops.mesh.primitive_torus_add(
         major_radius=major_radius,
         minor_radius=minor_radius,
         major_segments=major_segments,
-        minor_segments=12,
+        minor_segments=8,
         location=location,
         rotation=(pi / 2, 0.0, 0.0),
     )
@@ -141,7 +141,7 @@ def add_torus(name, location, major_radius, minor_radius, material, parent, majo
 
 def add_warp_membrane(name, location, radius, material, parent):
     bpy.ops.mesh.primitive_circle_add(
-        vertices=64,
+        vertices=48,
         radius=radius,
         fill_type="TRIFAN",
         location=location,
@@ -157,6 +157,27 @@ def add_warp_membrane(name, location, radius, material, parent):
 def point_camera(camera, target):
     direction = Vector(target) - camera.location
     camera.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
+
+
+def merge_mesh_children(parent):
+    groups = {}
+    for child in list(parent.children):
+        if child.type != "MESH" or not child.data.materials:
+            continue
+        groups.setdefault(child.data.materials[0].name, []).append(child)
+
+    for material_name, objects in groups.items():
+        if len(objects) == 1:
+            objects[0].name = f"{material_name}Part"
+            continue
+        bpy.ops.object.select_all(action="DESELECT")
+        for obj in objects:
+            obj.select_set(True)
+        active = objects[0]
+        bpy.context.view_layer.objects.active = active
+        bpy.ops.object.join()
+        active.name = f"{material_name}Merged"
+        active.parent = parent
 
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -294,8 +315,8 @@ for side in (-1, 1):
 
 ring_y = -3.35
 add_warp_membrane("CentralWarpField", (0.0, ring_y + 0.035, 0.02), 1.38, warp_field, root)
-add_torus("CentralWarpRing", (0.0, ring_y, 0.02), 1.46, 0.085, navigation, root, 72)
-add_torus("CentralWarpTrim", (0.0, ring_y, 0.02), 1.66, 0.042, copper, root, 72)
+add_torus("CentralWarpRing", (0.0, ring_y, 0.02), 1.46, 0.085, navigation, root, 48)
+add_torus("CentralWarpTrim", (0.0, ring_y, 0.02), 1.66, 0.042, copper, root, 48)
 for side in (-1, 1):
     add_cube(
         f"WarpRingStrutX_{side}",
@@ -340,6 +361,9 @@ landing_gear.parent = root
 for index, (x, z) in enumerate(((-2.68, -0.22), (2.68, -0.22), (0.0, 0.44))):
     add_cylinder(f"GearStrut_{index}", (x, -4.12, z), 0.052, 0.86, graphite, landing_gear, 12)
     add_cylinder(f"GearFoot_{index}", (x, -4.58, z), 0.26, 0.1, copper, landing_gear, 18)
+
+merge_mesh_children(root)
+merge_mesh_children(landing_gear)
 
 # Preview-only lighting and camera are excluded from the selected GLB export.
 preview_world = bpy.data.worlds.new("PreviewWorld")

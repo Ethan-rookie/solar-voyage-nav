@@ -1,4 +1,4 @@
-import { createSolarScene, hasSurfaceLandscape } from "./webgl-scene.js?v=20260715-3";
+import { createSolarScene, hasSurfaceLandscape } from "./webgl-scene.js?v=20260715-4";
 import { AU_KM, createAstrodynamicsEngine } from "./astrodynamics.js?v=20260715-1";
 
 const TAU = Math.PI * 2;

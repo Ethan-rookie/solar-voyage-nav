@@ -1,5 +1,4 @@
 import * as THREE from "../vendor/three.module.js";
-import { GLTFLoader } from "../vendor/addons/loaders/GLTFLoader.js";
 
 const TAU = Math.PI * 2;
 const UP = new THREE.Vector3(0, 1, 0);
@@ -160,6 +159,8 @@ export function createSolarScene({ canvas, bodies, visuals, getBodyPosition }) {
       scene.fog.density = 0.00035;
       return;
     }
+
+    ensureBlenderSurfaceShip(surfaceStage);
 
     const bodyId = phase.mode === "launch" ? frame.state.origin : frame.state.destination;
     const entry = bodyEntries.get(bodyId);
@@ -1357,16 +1358,37 @@ function createSurfaceStage(glowTexture, textureLoader, anisotropy, canvas) {
     bodyId: null,
     opacity: 1,
     canvas,
+    modelLoadState: "idle",
   };
   canvas.dataset.spacecraft = "procedural-fallback";
-  loadBlenderSurfaceShip(stage);
+  scheduleBlenderSurfaceShip(stage);
   return stage;
 }
 
-function loadBlenderSurfaceShip(stage) {
+function scheduleBlenderSurfaceShip(stage) {
+  window.setTimeout(() => {
+    if ("requestIdleCallback" in window) {
+      window.requestIdleCallback(() => ensureBlenderSurfaceShip(stage), { timeout: 1800 });
+    } else {
+      ensureBlenderSurfaceShip(stage);
+    }
+  }, 900);
+}
+
+async function ensureBlenderSurfaceShip(stage) {
+  if (stage.modelLoadState !== "idle") return;
+  stage.modelLoadState = "loading";
+  let GLTFLoader;
+  try {
+    ({ GLTFLoader } = await import("../vendor/addons/loaders/GLTFLoader.js"));
+  } catch {
+    stage.modelLoadState = "failed";
+    stage.canvas.dataset.spacecraft = "procedural-fallback";
+    return;
+  }
   const loader = new GLTFLoader();
   loader.load(
-    "./assets/models/orbitgo-warp-lancer.glb?v=20260715-1",
+    "./assets/models/orbitgo-warp-lancer.glb?v=20260715-2",
     (gltf) => {
       const model = gltf.scene;
       model.name = "OrbitGoWarpLancer";
@@ -1417,11 +1439,13 @@ function loadBlenderSurfaceShip(stage) {
       });
       stage.fallbackShip.visible = false;
       stage.blenderShip = model;
+      stage.modelLoadState = "loaded";
       stage.canvas.dataset.spacecraft = "blender-warp-lancer";
       setSurfaceOpacity(stage, stage.opacity);
     },
     undefined,
     () => {
+      stage.modelLoadState = "failed";
       stage.canvas.dataset.spacecraft = "procedural-fallback";
     },
   );
