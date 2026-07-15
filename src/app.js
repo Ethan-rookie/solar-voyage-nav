@@ -1,4 +1,4 @@
-import { createSolarScene, hasSurfaceLandscape } from "./webgl-scene.js?v=20260715-2";
+import { createSolarScene, hasSurfaceLandscape } from "./webgl-scene.js?v=20260715-3";
 import { AU_KM, createAstrodynamicsEngine } from "./astrodynamics.js?v=20260715-1";
 
 const TAU = Math.PI * 2;
@@ -703,14 +703,14 @@ const BODY_VISUALS = {
 const VEHICLES = [
   {
     id: "tourer",
-    name: "观光飞船",
+    name: "长枪级巡航舰",
     icon: "◆",
     speed: 2.2,
     range: 220,
     comfort: 96,
-    landing: "轨道接驳",
+    landing: "垂直起降",
     accent: "#ffd36c",
-    summary: "风景路线加成，适合第一次太阳系旅行。",
+    summary: "双曲率环预热虫洞，兼顾观景航线与长距离跃迁。",
   },
   {
     id: "sail",

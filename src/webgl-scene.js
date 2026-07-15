@@ -1366,12 +1366,12 @@ function createSurfaceStage(glowTexture, textureLoader, anisotropy, canvas) {
 function loadBlenderSurfaceShip(stage) {
   const loader = new GLTFLoader();
   loader.load(
-    "./assets/models/orbitgo-swept-wing.glb",
+    "./assets/models/orbitgo-warp-lancer.glb?v=20260715-1",
     (gltf) => {
       const model = gltf.scene;
-      model.name = "OrbitGoBlenderShip";
+      model.name = "OrbitGoWarpLancer";
       model.rotation.x = Math.PI / 2;
-      model.scale.setScalar(0.92);
+      model.scale.setScalar(0.82);
 
       const materials = new Set();
       model.traverse((object) => {
@@ -1405,9 +1405,19 @@ function loadBlenderSurfaceShip(stage) {
       }
 
       stage.ship.add(model);
+      stage.exhaust.scale.setScalar(0.82);
+      const plumePositions = [
+        [-2.78, -6.25, -0.03],
+        [2.78, -6.25, -0.03],
+        [0, -5.82, -0.06],
+      ];
+      stage.exhaust.children.forEach((plume, index) => {
+        const position = plumePositions[index];
+        if (position) plume.position.set(...position);
+      });
       stage.fallbackShip.visible = false;
       stage.blenderShip = model;
-      stage.canvas.dataset.spacecraft = "blender-glb";
+      stage.canvas.dataset.spacecraft = "blender-warp-lancer";
       setSurfaceOpacity(stage, stage.opacity);
     },
     undefined,

@@ -54,7 +54,7 @@ https://<GitHub 用户名>.github.io/solar-voyage-nav/
 - 已配置星球风貌的天体使用对应地表起飞与着陆场景，未配置的天体沿用中心锁定的轨道港景观
 - 地表风貌阶段隔离太阳系天体图层，只保留当地地形、天空与飞行器
 - 月球与火星起降接入 NASA/JSC、NASA/JPL-Caltech 实景素材，其余天体使用带凹凸、环形山、冰裂纹与大气差异的程序化拟真风貌
-- Blender 制作的原创掠翼飞船，包含宽幅双翼、装甲座舱、三组推进器、进气光环和起落架；网页运行时加载 GLB，失败时自动回退程序化模型
+- Blender 制作的原创“跃迁长枪”飞船：瘦长流线船体、后掠光翼、双环形曲率引擎与中央虫洞线圈；网页运行时加载 GLB，失败时自动回退程序化模型
 - 地表第三人称起飞、深空第一视角巡航、目的地第三人称下降与着陆连续镜头
 - 卫星航线在离港和抵达阶段冻结端点，母行星退到可见背景位，避免遮挡和高速公转带动镜头
 - 全窗口驾驶舱、角切科技边框、动态锁定框与真实模式天体自转跟随视角
@@ -82,7 +82,7 @@ node scripts/generate-jpl-ephemeris.mjs
 飞船的可编辑源文件与网页模型位于 `assets/models/`。安装 Blender 后可以重新生成：
 
 ```bash
-blender --background --python scripts/blender/build-space-opera-ship.py
+blender --background --python scripts/blender/build-warp-lancer.py
 ```
 
 ## 文件结构
