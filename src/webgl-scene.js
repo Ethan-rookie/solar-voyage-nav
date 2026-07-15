@@ -1091,19 +1091,25 @@ function createRouteState(glowTexture) {
 
 function createCompactRouteShip(material) {
   const ship = new THREE.Group();
-  const hull = new THREE.Mesh(new THREE.SphereGeometry(0.72, 14, 10), material);
-  hull.scale.set(0.82, 1.85, 0.9);
+  const darkMaterial = new THREE.MeshBasicMaterial({ color: 0x152027 });
+  const accentMaterial = new THREE.MeshBasicMaterial({ color: 0xd66b42 });
+  const lightMaterial = new THREE.MeshBasicMaterial({ color: 0x8ff3ef });
+  const hull = new THREE.Mesh(createFuselageGeometry(), material);
   ship.add(hull);
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.62, 1.5, 5), material);
-  nose.position.y = 1.85;
-  ship.add(nose);
-  const wings = new THREE.Mesh(new THREE.BoxGeometry(3.5, 0.12, 1.25), material);
-  wings.position.y = -0.18;
-  ship.add(wings);
-  const tail = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.16, 2.6), material);
-  tail.position.y = -0.72;
-  ship.add(tail);
-  ship.scale.setScalar(0.86);
+  const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.72, 12, 8), darkMaterial);
+  canopy.scale.set(0.82, 1.12, 0.45);
+  canopy.position.set(0, 1.05, 0.64);
+  ship.add(canopy);
+  for (const side of [-1, 1]) {
+    ship.add(new THREE.Mesh(createSweptWingGeometry(side), side < 0 ? material : accentMaterial));
+    const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.52, 1.8, 8), darkMaterial);
+    engine.position.set(side * 3.15, -1.05, -0.06);
+    ship.add(engine);
+    const engineGlow = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.34, 0.08, 10), lightMaterial);
+    engineGlow.position.set(side * 3.15, -1.98, -0.06);
+    ship.add(engineGlow);
+  }
+  ship.scale.setScalar(0.36);
   return ship;
 }
 
@@ -1374,57 +1380,116 @@ function createCinematicShip(glowTexture) {
   const darkMaterial = register(
     new THREE.MeshStandardMaterial({ color: 0x172126, roughness: 0.6, metalness: 0.74 }),
   );
+  const insetMaterial = register(
+    new THREE.MeshStandardMaterial({ color: 0x0b1217, emissive: 0x09222a, emissiveIntensity: 0.42, roughness: 0.7, metalness: 0.6 }),
+  );
 
-  const hull = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 18), hullMaterial);
-  hull.scale.set(1.18, 2.05, 0.96);
-  hull.position.y = 0.38;
-  ship.add(hull);
-  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.98, 2.25, 6), panelMaterial);
-  nose.position.y = 2.72;
-  nose.rotation.y = Math.PI / 6;
-  ship.add(nose);
-  const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.74, 24, 14), glassMaterial);
-  canopy.scale.set(0.82, 1.08, 0.5);
-  canopy.position.set(0, 1.25, 0.78);
+  const fuselage = new THREE.Mesh(createFuselageGeometry(), hullMaterial);
+  ship.add(fuselage);
+  const upperShell = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 18), panelMaterial);
+  upperShell.scale.set(1.02, 1.78, 0.46);
+  upperShell.position.set(0, 0.38, 0.42);
+  ship.add(upperShell);
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 14), darkMaterial);
+  belly.scale.set(0.94, 1.55, 0.48);
+  belly.position.set(0, -0.12, -0.42);
+  ship.add(belly);
+  const noseCap = new THREE.Mesh(createExtrudedOutlineGeometry([
+    [-0.72, 0.2],
+    [0, 2.15],
+    [0.72, 0.2],
+    [0.58, -0.65],
+    [-0.58, -0.65],
+  ], 0.34), trimMaterial);
+  noseCap.position.y = 1.45;
+  ship.add(noseCap);
+
+  const canopy = new THREE.Mesh(new THREE.SphereGeometry(0.78, 30, 18), glassMaterial);
+  canopy.scale.set(0.86, 1.24, 0.48);
+  canopy.position.set(0, 1.05, 0.84);
   ship.add(canopy);
-  const canopyFrame = new THREE.Mesh(new THREE.TorusGeometry(0.65, 0.055, 8, 32), trimMaterial);
-  canopyFrame.scale.set(1, 1.28, 1);
-  canopyFrame.position.set(0, 1.2, 1.03);
+  const canopyFrame = new THREE.Mesh(new THREE.TorusGeometry(0.67, 0.045, 8, 40), trimMaterial);
+  canopyFrame.scale.set(1, 1.38, 1);
+  canopyFrame.position.set(0, 1.02, 1.07);
   ship.add(canopyFrame);
+  for (const x of [-0.36, 0.36]) {
+    const canopyRail = new THREE.Mesh(new THREE.BoxGeometry(0.045, 1.65, 0.05), trimMaterial);
+    canopyRail.position.set(x, 1.02, 1.1);
+    canopyRail.rotation.z = x < 0 ? -0.12 : 0.12;
+    ship.add(canopyRail);
+  }
 
   for (const side of [-1, 1]) {
     const wing = new THREE.Mesh(createSweptWingGeometry(side), hullMaterial);
     ship.add(wing);
     const wingPanel = new THREE.Mesh(createSweptWingGeometry(side), panelMaterial);
-    wingPanel.scale.set(0.72, 0.72, 0.48);
-    wingPanel.position.z = 0.26;
+    wingPanel.scale.set(0.82, 0.82, 0.48);
+    wingPanel.position.set(side * -0.08, -0.14, 0.24);
     ship.add(wingPanel);
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.7, 0.1, 0.16), panelMaterial);
-    stripe.position.set(side * 2.05, -0.62, 0.28);
-    stripe.rotation.z = side * -0.29;
+    const leadingEdge = new THREE.Mesh(new THREE.BoxGeometry(3.6, 0.12, 0.16), trimMaterial);
+    leadingEdge.position.set(side * 2.55, 0.34, 0.3);
+    leadingEdge.rotation.z = side * -0.17;
+    ship.add(leadingEdge);
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(2.9, 0.12, 0.14), panelMaterial);
+    stripe.position.set(side * 2.42, -0.72, 0.32);
+    stripe.rotation.z = side * -0.24;
     ship.add(stripe);
-    const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.56, 2.05, 14), darkMaterial);
-    engine.position.set(side * 2.62, -0.82, -0.15);
+
+    const wingTip = new THREE.Mesh(createExtrudedOutlineGeometry([
+      [-0.42, 0.7],
+      [0.28, 0.38],
+      [0.42, -0.75],
+      [-0.28, -0.52],
+    ], 0.14), panelMaterial);
+    wingTip.position.set(side * 4.35, -0.38, 0.12);
+    wingTip.rotation.z = side * -0.08;
+    ship.add(wingTip);
+
+    const engineShroud = new THREE.Mesh(new THREE.SphereGeometry(1, 22, 14), hullMaterial);
+    engineShroud.scale.set(0.72, 1.32, 0.62);
+    engineShroud.position.set(side * 3.2, -0.82, -0.02);
+    ship.add(engineShroud);
+    const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.44, 0.6, 2.35, 18), darkMaterial);
+    engine.position.set(side * 3.2, -1.05, -0.06);
     ship.add(engine);
-    const engineBand = new THREE.Mesh(new THREE.CylinderGeometry(0.58, 0.58, 0.34, 14), trimMaterial);
-    engineBand.position.set(side * 2.62, -1.28, -0.15);
+    const engineBand = new THREE.Mesh(new THREE.CylinderGeometry(0.63, 0.63, 0.3, 18), trimMaterial);
+    engineBand.position.set(side * 3.2, -1.42, -0.06);
     ship.add(engineBand);
-    const engineLight = new THREE.Mesh(new THREE.TorusGeometry(0.43, 0.08, 8, 28), navigationMaterial);
+    const intake = new THREE.Mesh(new THREE.TorusGeometry(0.42, 0.055, 8, 30), navigationMaterial);
+    intake.rotation.x = Math.PI / 2;
+    intake.position.set(side * 3.2, 0.18, -0.06);
+    ship.add(intake);
+    const engineLight = new THREE.Mesh(new THREE.TorusGeometry(0.46, 0.085, 8, 32), navigationMaterial);
     engineLight.rotation.x = Math.PI / 2;
-    engineLight.position.set(side * 2.62, -1.91, -0.15);
+    engineLight.position.set(side * 3.2, -2.24, -0.06);
     ship.add(engineLight);
+
+    for (let index = 0; index < 3; index += 1) {
+      const vent = new THREE.Mesh(new THREE.BoxGeometry(0.46, 0.08, 0.1), insetMaterial);
+      vent.position.set(side * (1.25 + index * 0.42), -1.1 - index * 0.08, 0.35);
+      vent.rotation.z = side * -0.24;
+      ship.add(vent);
+    }
   }
-  const belly = new THREE.Mesh(new THREE.BoxGeometry(1.7, 1.45, 1.35), darkMaterial);
-  belly.position.set(0, -1.12, -0.06);
-  ship.add(belly);
-  const dorsalFin = new THREE.Mesh(new THREE.ConeGeometry(0.6, 1.8, 3), panelMaterial);
-  dorsalFin.position.set(0, -0.55, -1.05);
-  dorsalFin.rotation.x = Math.PI / 2;
-  dorsalFin.rotation.z = Math.PI;
-  ship.add(dorsalFin);
-  const trim = new THREE.Mesh(new THREE.BoxGeometry(0.16, 3.2, 1.08), trimMaterial);
-  trim.position.set(0, 0.2, 0.18);
-  ship.add(trim);
+
+  const centerEngine = new THREE.Mesh(new THREE.CylinderGeometry(0.38, 0.48, 1.8, 16), insetMaterial);
+  centerEngine.position.set(0, -1.48, -0.38);
+  ship.add(centerEngine);
+  const centerLight = new THREE.Mesh(new THREE.TorusGeometry(0.37, 0.07, 8, 28), navigationMaterial);
+  centerLight.rotation.x = Math.PI / 2;
+  centerLight.position.set(0, -2.4, -0.38);
+  ship.add(centerLight);
+  const dorsalSpine = new THREE.Mesh(new THREE.BoxGeometry(0.18, 3.2, 0.14), trimMaterial);
+  dorsalSpine.position.set(0, -0.02, 0.62);
+  ship.add(dorsalSpine);
+  const tailDeck = new THREE.Mesh(createExtrudedOutlineGeometry([
+    [-1.05, 0.85],
+    [1.05, 0.85],
+    [0.72, -1.0],
+    [-0.72, -1.0],
+  ], 0.22), darkMaterial);
+  tailDeck.position.set(0, -1.4, 0.06);
+  ship.add(tailDeck);
 
   const exhaustMaterial = register(
     new THREE.MeshBasicMaterial({ map: glowTexture, color: 0x72dcff, blending: THREE.AdditiveBlending, depthWrite: false }),
@@ -1432,46 +1497,69 @@ function createCinematicShip(glowTexture) {
   );
   const exhaust = new THREE.Group();
   exhaust.material = exhaustMaterial;
-  for (const [x, z, radius, length] of [[-2.62, -0.15, 0.48, 3.5], [2.62, -0.15, 0.48, 3.5], [0, -0.2, 0.38, 2.7]]) {
+  for (const [x, z, radius, length] of [[-3.2, -0.06, 0.5, 3.9], [3.2, -0.06, 0.5, 3.9], [0, -0.38, 0.34, 3.1]]) {
     const plume = new THREE.Mesh(new THREE.ConeGeometry(radius, length, 14, 1, true), exhaustMaterial);
     plume.rotation.z = Math.PI;
-    plume.position.set(x, -2.15 - length * 0.48, z);
+    plume.position.set(x, -2.32 - length * 0.48, z);
     exhaust.add(plume);
   }
   ship.add(exhaust);
 
   const landingGear = new THREE.Group();
-  for (const [x, z] of [[-1.55, -0.45], [1.55, -0.45], [0, 0.72]]) {
-    const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.07, 1.2, 8), darkMaterial);
-    strut.position.set(x, -1.95, z);
+  for (const [x, z] of [[-2.45, -0.36], [2.45, -0.36], [0, 0.58]]) {
+    const strut = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.075, 1.25, 8), darkMaterial);
+    strut.position.set(x, -2.02, z);
     strut.rotation.z = x === 0 ? 0 : x > 0 ? -0.3 : 0.3;
     landingGear.add(strut);
-    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.42, 0.12, 12), trimMaterial);
-    foot.position.set(x * 1.08, -2.54, z);
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.44, 0.12, 12), trimMaterial);
+    foot.position.set(x * 1.05, -2.62, z);
     landingGear.add(foot);
   }
   ship.add(landingGear);
-  ship.scale.setScalar(1.08);
+  ship.scale.setScalar(0.92);
   return { ship, exhaust, landingGear, fadeMaterials, accentMaterials: [navigationMaterial, glassMaterial] };
 }
 
+function createFuselageGeometry() {
+  return createExtrudedOutlineGeometry([
+    [-0.92, -1.65],
+    [-1.16, 0.72],
+    [-0.58, 2.2],
+    [0, 3.18],
+    [0.58, 2.2],
+    [1.16, 0.72],
+    [0.92, -1.65],
+  ], 0.48);
+}
+
 function createSweptWingGeometry(side) {
-  const thickness = 0.18;
-  const outline = [[0.58, 0.72], [3.85, -0.2], [3.18, -1.9], [0.72, -1.18]];
+  return createExtrudedOutlineGeometry([
+    [0.62 * side, 1.02],
+    [4.72 * side, 0.28],
+    [4.34 * side, -0.92],
+    [3.08 * side, -2.08],
+    [0.86 * side, -1.52],
+  ], 0.18);
+}
+
+function createExtrudedOutlineGeometry(outline, thickness) {
   const vertices = [];
   for (const z of [-thickness, thickness]) {
-    for (const [x, y] of outline) vertices.push(x * side, y, z);
+    for (const [x, y] of outline) vertices.push(x, y, z);
   }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute("position", new THREE.Float32BufferAttribute(vertices.flat(), 3));
-  geometry.setIndex([
-    0, 1, 2, 0, 2, 3,
-    4, 6, 5, 4, 7, 6,
-    0, 4, 5, 0, 5, 1,
-    1, 5, 6, 1, 6, 2,
-    2, 6, 7, 2, 7, 3,
-    3, 7, 4, 3, 4, 0,
-  ]);
+  const count = outline.length;
+  const indices = [];
+  for (let index = 1; index < count - 1; index += 1) {
+    indices.push(0, index + 1, index);
+    indices.push(count, count + index, count + index + 1);
+  }
+  for (let index = 0; index < count; index += 1) {
+    const next = (index + 1) % count;
+    indices.push(index, next, count + next, index, count + next, count + index);
+  }
+  geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
 }
